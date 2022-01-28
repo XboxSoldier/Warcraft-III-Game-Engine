@@ -2,19 +2,62 @@ do
     -- Game --
     game = {}
 
-    -- Init --
-    local init_array = {}
+    -- Settings --
+    local independentStartup = false
 
-    local init_old = InitBlizzard
-
-    function onInitialization(code)
-        if type(code) == 'function' then table.insert(init_array, code) end
+    -- Basic Library --
+    function group2Table(group)
+        local r = {}
+        for k = 0, BlzGroupGetSize(group) - 1 do
+            table.insert(r, BlzGroupUnitAt(group, k))
+        end
+        return r
     end
 
-    function InitBlizzard()
-        init_old()
-        for i = 1, #init_array do
-            init_array[i]()
+    function group2Storage(group)
+        local r = storage:create()
+        for k = 0, BlzGroupGetSize(group) - 1 do
+            r:add(BlzGroupUnitAt(group, k))
+        end
+        return r
+    end
+
+    function table2Group(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        local group = CreateGroup()
+        for i = 1, #parameters do
+            GroupAddUnit(group, parameters[i])
+        end
+        return group
+    end
+
+    function unitApplyBuff(unit, buffAbility, command)
+        local code = FourCC(buffAbility)
+        local dummy = DummyRetrieve(Player(PLAYER_NEUTRAL_PASSIVE), GetUnitX(unit), GetUnitY(unit), GetUnitFlyHeight(unit), 0)
+
+        UnitAddAbility(dummy, code)
+        IssueTargetOrder(dummy, command, unit)
+        UnitRemoveAbility(dummy, code)
+        DummyRecycle(dummy)
+    end
+
+    -- Init --
+    if independentStartup then
+        local init_array = {}
+        local init_old = InitBlizzard
+        onInitialization = function(code)
+            if type(code) == 'function' then table.insert(init_array, code) end
+        end
+        InitBlizzard = function()
+            init_old()
+            for i = 1, #init_array do
+                init_array[i]()
+            end
+        end
+    else
+        onInitialization = function(code)
+            onInit(code)
         end
     end
 
@@ -64,6 +107,7 @@ do
         for i = 1, #arguments do
             this:add(arguments[i])
         end
+        return this
     end
 
     function storage_mt:add(...)
@@ -127,6 +171,7 @@ do
             if type(arguments[i]) == 'function' then this.code = arguments[i] end
         end
         valiador_array[this.name] = this
+        return this
     end
 
     function valiador_mt:retrieve(name)
@@ -155,6 +200,7 @@ do
             if getmetatable(arguments[i]) == storage_mt then this.valiadors = arguments[i] end
         end
         effect_array[this.name] = this
+        return this
     end
 
     function effect_mt:retrieve(name)
@@ -378,11 +424,12 @@ do
         if parameters.linkBuff then
             score(1, parameters.target, "buffs", parameters.linkBuff)
             if getScore(parameters.target, "buffs", parameters.linkBuff) > 0 and not UnitHasBuffBJ(parameters.target, FourCC(parameters.linkBuff)) then
-                -- Apply Buff
+                unitApplyBuff(parameters.target, parameters.buffAbility, parameters.buffCommand)
             end
         end
         event_BehaviorApplying:apply(parameters)
         event_BehaviorApplied:apply(parameters)
+        return parameters
     end
 
     function behavior_mt:destroy()
@@ -391,6 +438,12 @@ do
         end
         event_BehaviorRemoving:apply(self)
         event_BehaviorRemoved:apply(self)
+        if self.linkBuff then
+            score(-1, self.target, "buffs", self.linkBuff)
+            if getScore(self.target, "buffs", self.linkBuff) <= 0 and UnitHasBuffBJ(self.target, FourCC(self.linkBuff)) then
+                UnitRemoveBuffBJ(self.target, FourCC(self.linkBuff))
+            end
+        end
         local t = aquireGameData(true, self.source, 'behaviorApplying')
         t:remove(self)
         t = aquireGameData(true, self.target, 'behaviorApplied')
@@ -445,7 +498,7 @@ do
                     if v.buffControl and not UnitHasBuffBJ(v.target, FourCC(v.linkBuff)) then
                         r = true
                     elseif not v.buffControl and not UnitHasBuffBJ(v.target, FourCC(v.linkBuff)) then
-                        -- Apply Buff
+                        unitApplyBuff(v.target, v.buffAbility, v.buffCommand)
                     end
                 end
                 if r then
@@ -482,7 +535,141 @@ do
     end)
 end
 
--- Damage Register --
+-- Shield --
+do
+    attribute_Shield = attribute:create('shield')
+    attribute_MaxShield = attribute:create('maxShield')
+    effect_ShieldUpdate = effect:create('shieldUpdate', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        if attribute_Shield:get(parameters.parent) > attribute_MaxShield:get(parameters.parent) then
+            attribute_Shield:change(parameters.parent, attribute_MaxShield:get(parameters.parent) - attribute_Shield:get(parameters.parent))
+        end
+    end)
+    effect_AddMaxShield = effect:create('addMaxShield', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        attribute_Shield:change(parameters.parent, parameters.value)
+    end)
+
+    attribute_Shield:changeEffect(effect_ShieldUpdate)
+    attribute_MaxShield:changeEffect(effect_AddMaxShield)
+    attribute_MaxShield:changeEffect(effect_ShieldUpdate)
+end
+
+-- Unit Management --
+do
+    local unitGenerate = nil
+    local unitDeath = nil
+    local unitDecay = nil
+
+    event_UnitInit = event:create('UnitInit', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        local effects = storage:create()
+        local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
+        for i = 1, #parents do
+            local t = aquireGameData(false, parents[i], event_UnitInit)
+            for j = 1, #t do
+                effects:add(t[j])
+            end
+        end
+        for i = 1, #effects do
+            effects[i]:apply(parameters)
+        end
+        effects:destroy()
+    end)
+
+    event_UnitKilled = event:create('UnitKilled', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        local effects = storage:create()
+        local parents = {'global', GetOwningPlayer(parameters[2]), parameters[2]}
+        for i = 1, #parents do
+            local t = aquireGameData(false, parents[i], event_UnitKilled)
+            for j = 1, #t do
+                effects:add(t[j])
+            end
+        end
+        for i = 1, #effects do
+            effects[i]:apply(parameters)
+        end
+        effects:destroy()
+    end)
+
+    event_UnitKilling = event:create('UnitKilling', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        local effects = storage:create()
+        local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
+        for i = 1, #parents do
+            local t = aquireGameData(false, parents[i], event_UnitKilling)
+            for j = 1, #t do
+                effects:add(t[j])
+            end
+        end
+        for i = 1, #effects do
+            effects[i]:apply(parameters)
+        end
+        effects:destroy()
+    end)
+
+    event_UnitDecay = event:create('UnitDecay', function(...)
+        local parameters = {...}
+        if tableNotObject(parameters[1]) then parameters = parameters[1] end
+        local effects = storage:create()
+        local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
+        for i = 1, #parents do
+            local t = aquireGameData(false, parents[i], event_UnitDecay)
+            for j = 1, #t do
+                effects:add(t[j])
+            end
+        end
+        for i = 1, #effects do
+            effects[i]:apply(parameters)
+        end
+        effects:destroy()
+    end)
+
+    onInitialization(function()
+        unitGenerate = CreateTrigger()
+        unitDeath = CreateTrigger()
+        unitDecay = CreateTrigger()
+        local region=CreateRegion()
+        local rect = GetWorldBounds()
+        RegionAddRect(region, rect)
+        TriggerRegisterEnterRegionSimple(unitGenerate, region)
+        RemoveRect(rect)
+        TriggerRegisterAnyUnitEventBJ(unitDeath, EVENT_PLAYER_UNIT_DEATH)
+        TriggerRegisterAnyUnitEventBJ(unitDecay, EVENT_PLAYER_UNIT_DECAY)
+        TriggerAddCondition(unitGenerate, Filter(function()
+            local unit = GetTriggerUnit()
+            event_UnitInit:apply(unit)
+        end))
+        TriggerAddCondition(unitDeath, Filter(function()
+            local unit = GetTriggerUnit()
+            local killer = GetKillingUnit()
+            if killer then
+                event_UnitKilling:apply(killer, unit)
+            end
+            event_UnitKilled:apply(killer, unit)
+        end))
+        TriggerAddCondition(triggerDecay, Filter(function()
+            local unit = GetTriggerUnit()
+            event_UnitDecay:apply(unit)
+            game[unit]=nil
+        end))
+        for i = 0, bj_MAX_PLAYER_SLOTS - 1 do
+            local group = CreateGroup()
+            GroupEnumUnitsOfPlayer(group, Player(i), Filter(function()
+                local unit = GetFilterUnit()
+                event_UnitInit:apply(unit)
+            end))
+        end
+    end)
+end
+
+-- Damage --
 do
     local trigger = nil
 
@@ -737,80 +924,80 @@ do
     end
 
     function DamageUnit(source,target,value,attackType,damageType,flags)
-        local event = {}
-        event.source = {}
-        event.target = {}
-        event.value = value
-        event.damageToHull = value
-        event.attackType = attackType
-        event.damageType = damageType
-        event.flags = flags or storage:create()
+        local parameters = {}
+        parameters.source = {}
+        parameters.target = {}
+        parameters.value = value
+        parameters.damageToHull = value
+        parameters.attackType = attackType
+        parameters.damageType = damageType
+        parameters.flags = flags or storage:create()
 
-        event.source.unit = source
-        event.source.player = GetOwningPlayer(source)
-        event.source.handle = GetHandleId(source)
-        event.source.id = GetUnitTypeId(source)
-        event.source.x = GetUnitX(source)
-        event.source.y = GetUnitY(source)
-        event.source.z = GetUnitZ(source)
+        parameters.source.unit = source
+        parameters.source.player = GetOwningPlayer(source)
+        parameters.source.handle = GetHandleId(source)
+        parameters.source.id = GetUnitTypeId(source)
+        parameters.source.x = GetUnitX(source)
+        parameters.source.y = GetUnitY(source)
+        parameters.source.z = GetUnitZ(source)
 
-        event.target.unit = target
-        event.target.player = GetOwningPlayer(target)
-        event.target.handle = GetHandleId(target)
-        event.target.id = GetUnitTypeId(target)
-        event.target.x = GetUnitX(target)
-        event.target.y = GetUnitY(target)
-        event.target.z = GetUnitZ(target)
+        parameters.target.unit = target
+        parameters.target.player = GetOwningPlayer(target)
+        parameters.target.handle = GetHandleId(target)
+        parameters.target.id = GetUnitTypeId(target)
+        parameters.target.x = GetUnitX(target)
+        parameters.target.y = GetUnitY(target)
+        parameters.target.z = GetUnitZ(target)
 
-        event.modifiers = 0.00
-        event.factors = 1.00
-        event.ignorarmor = false
+        parameters.modifiers = 0.00
+        parameters.factors = 1.00
+        parameters.ignorarmor = false
 
-        event_Damaging_1:apply(event)
-        event_Damaged_1:apply(event)
+        event_Damaging_1:apply(parameters)
+        event_Damaged_1:apply(parameters)
 
-        if event.flags:search('DAMAGE_FLAG_ATTACK') and not event.ignorarmor then
-            if BlzGetUnitArmor(event.target.unit) > 0 then
-                event.value = event.value * (1.00- ((BlzGetUnitArmor(event.target.unit) * 0.06) / (BlzGetUnitArmor(event.target.unit) * 0.06 +1 )))
-            elseif BlzGetUnitArmor(event.target.unit) < 0 then
-                event.value = event.value * (2- ( 0.94 ^ (-1 * BlzGetUnitArmor(event.target.unit))))
+        if parameters.flags:search('DAMAGE_FLAG_ATTACK') and not parameters.ignorarmor then
+            if BlzGetUnitArmor(parameters.target.unit) > 0 then
+                parameters.value = parameters.value * (1.00- ((BlzGetUnitArmor(parameters.target.unit) * 0.06) / (BlzGetUnitArmor(parameters.target.unit) * 0.06 +1 )))
+            elseif BlzGetUnitArmor(parameters.target.unit) < 0 then
+                parameters.value = parameters.value * (2- ( 0.94 ^ (-1 * BlzGetUnitArmor(parameters.target.unit))))
             end
         end
-        if not event.ignorarmor then
-            event.value = event.value * damageconstants[AttackTypeToInteger(event.attackType) + 1][BlzGetUnitIntegerField(event.target.unit, UNIT_IF_DEFENSE_TYPE) + 1]
+        if not parameters.ignorarmor then
+            parameters.value = parameters.value * damageconstants[AttackTypeToInteger(parameters.attackType) + 1][BlzGetUnitIntegerField(parameters.target.unit, UNIT_IF_DEFENSE_TYPE) + 1]
         end
-        if IsUnitType(event.target.unit,UNIT_TYPE_ETHEREAL) then
-            event.value=event.value * ethernalconstants[AttackTypeToInteger(event.attackType) + 1]
+        if IsUnitType(parameters.target.unit,UNIT_TYPE_ETHEREAL) then
+            parameters.value=parameters.value * ethernalconstants[AttackTypeToInteger(parameters.attackType) + 1]
         end
 
-        if event.value == 0.00 then return end
+        if parameters.value == 0.00 then return end
 
-        event_Damaging_2:apply(event)
-        event_Damaged_2:apply(event)
+        event_Damaging_2:apply(parameters)
+        event_Damaged_2:apply(parameters)
 
-        event_Damaging_3:apply(event)
-        event_Damaged_3:apply(event)
+        event_Damaging_3:apply(parameters)
+        event_Damaged_3:apply(parameters)
 
-        event_Damaging_4:apply(event)
-        event_Damaged_4:apply(event)
+        event_Damaging_4:apply(parameters)
+        event_Damaged_4:apply(parameters)
 
-        event_Damaging_5:apply(event)
-        event_Damaged_5:apply(event)
+        event_Damaging_5:apply(parameters)
+        event_Damaged_5:apply(parameters)
 
-        event.damageToHull = event.value
+        parameters.damageToHull = parameters.value
 
-        if attribute:retireve('shield'):get(event.target.unit) > 0 then
-            local shield = attribute:retireve('shield'):get(event.target.unit)
-            local shieldDamage = event.value
+        if attribute:retireve('shield'):get(parameters.target.unit) > 0 then
+            local shield = attribute:retireve('shield'):get(parameters.target.unit)
+            local shieldDamage = parameters.value
             if shieldDamage > shield then shieldDamage = shield end
-            event.value = event.value - shieldDamage
-            attribute:retireve('shield'):change(event.target.unit, -1 * shieldDamage)
+            parameters.value = parameters.value - shieldDamage
+            attribute:retireve('shield'):change(parameters.target.unit, -1 * shieldDamage)
         end
 
-        UnitDamageTarget(event.source.unit,event.target.unit,event.value,false,false,ATTACK_TYPE_CHAOS,DAMAGE_TYPE_UNKNOWN,WEAPON_TYPE_WHOKNOWS)
+        UnitDamageTarget(parameters.source.unit, parameters.target.unit, parameters.value, false, false, ATTACK_TYPE_CHAOS, DAMAGE_TYPE_UNKNOWN, WEAPON_TYPE_WHOKNOWS)
 
-        event_Damaging_6:apply(event)
-        event_Damaged_6:apply(event)
+        event_Damaging_6:apply(parameters)
+        event_Damaged_6:apply(parameters)
     end
 
     onInitialization(function()
@@ -822,7 +1009,7 @@ do
                 return
             end
 
-            if GetEventDamage()<=0.001 then
+            if GetEventDamage() <= 0.001 then
                 BlzSetEventDamage(0.00)
                 return
             end
@@ -836,9 +1023,162 @@ do
 
             flags:add(ConvertDamageCat(BlzGetEventDamageType()))
 
-            DamageUnit(GetEventDamageSource(),GetTriggerUnit(),GetEventDamage(),BlzGetEventAttackType(),BlzGetEventDamageType(),flags)
+            DamageUnit(GetEventDamageSource(), GetTriggerUnit(), GetEventDamage(), BlzGetEventAttackType(), BlzGetEventDamageType(), flags)
 
             BlzSetEventDamage(0.00)
         end))
     end)
+end
+
+-- Advanced Selection --
+do
+    local function LocIsAlly(u, p)
+        return IsUnitAlly(u, p)
+    end
+    local function LocIsEnemy(u, p)
+        return IsUnitEnemy(u, p)
+    end
+    local function LocIsBiological(u, p)
+        return not IsUnitType(u, UNIT_TYPE_MECHANICAL)
+    end
+    local function LocIsMechanical(u, p)
+        return IsUnitType(u, UNIT_TYPE_MECHANICAL)
+    end
+    local function LocIsNonHero(u, p)
+        return not IsUnitType(u, UNIT_TYPE_HERO)
+    end
+    local function LocIsHero(u, p)
+        return IsUnitType(u, UNIT_TYPE_HERO)
+    end
+    local function LocIsMagicVulnerable(u, p)
+        return not IsUnitType(u, UNIT_TYPE_MAGIC_IMMUNE)
+    end
+    local function LocIsMagicImmune(u, p)
+        return IsUnitType(u, UNIT_TYPE_MAGIC_IMMUNE)
+    end
+    local function LocIsNonStructure(u, p)
+        return not IsUnitType(u, UNIT_TYPE_STRUCTURE)
+    end
+    local function LocIsStructure(u, p)
+        return IsUnitType(u, UNIT_TYPE_STRUCTURE)
+    end
+    local function LocIsVulnerable(u, p)
+        return not BlzIsUnitInvulnerable(u)
+    end
+    local function LocIsInvulnerable(u, p)
+        return BlzIsUnitInvulnerable(u)
+    end
+    local function LocIsGround(u, p)
+        return IsUnitType(u, UNIT_TYPE_GROUND)
+    end
+    local function LocIsAir(u, p)
+        return IsUnitType(u, UNIT_TYPE_FLYING)
+    end
+
+    function filterTable(t,f,p)
+        local r = storage:create()
+        local e = {}
+        for k, v in ipairs(f) do
+            if v=="ally" then
+                table.insert(e, LocIsAlly)
+            elseif v=="enemy" then
+                table.insert(e, LocIsEnemy)
+            elseif v=="biological" then
+                table.insert(e, LocIsBiological)
+            elseif v=="mechanical" then
+                table.insert(e, LocIsMechanical)
+            elseif v=="non-hero" then
+                table.insert(e, LocIsNonHero)
+            elseif v=="hero" then
+                table.insert(e, LocIsHero)
+            elseif v=="magic-vulnerable" then
+                table.insert(e, LocIsMagicVulnerable)
+            elseif v=="magic-immune" then
+                table.insert(e, LocIsMagicImmune)
+            elseif v=="vulnerable" then
+                table.insert(e, LocIsVulnerable)
+            elseif v=="invulnerable" then
+                table.insert(e, LocIsInvulnerable)
+            elseif v=="non-structure" then
+                table.insert(e, LocIsNonStructure)
+            elseif v=="structure" then
+                table.insert(e, LocIsStructure)
+            elseif v=="ground" then
+                table.insert(e, LocIsGround)
+            elseif v=="air" then
+                table.insert(e, LocIsAir)
+            end
+        end
+        for k, v in ipairs(t) do
+            local access=true
+            for i, u in ipairs(e) do
+                if not u(v, p) then
+                    access=false
+                    break
+                end
+            end
+            if access then r:add(v) end
+        end
+        return r
+    end
+
+    function getUnitsInRangeCollision(x, y, radius)
+        local group = CreateGroup()
+        GroupEnumUnitsInRange(group, x, y, radius+450, nil)
+        local list = Group2Table(group)
+        DestroyGroup(group)
+
+        for k, v in ipairs(list) do
+            local distance = SquareRoot((x-GetUnitX(v)) ^ 2 + (y-GetUnitY(v)) ^ 2)
+            if distance - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
+        end
+
+        local r = storage:create()
+        for _, v in ipairs(list) do r:add(v) end
+
+        return r
+    end
+
+    function getUnitsInRangeOfUnitCollision(unit, radius)
+        local group = CreateGroup()
+        local x = GetUnitX(unit)
+        local y = GetUnitY(unit)
+        GroupEnumUnitsInRange(group, x, y, radius+450, nil)
+        local list = Group2Table(group)
+        DestroyGroup(group)
+
+        for k, v in ipairs(list) do
+            local distance = SquareRoot((x-GetUnitX(v)) ^ 2 + (y-GetUnitY(v)) ^ 2)
+            if distance - BlzGetUnitCollisionSize(unit) - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
+        end
+
+        local r = storage:create()
+        for _, v in ipairs(list) do
+            r:add(v)
+        end
+
+        return r
+    end
+
+    function getUnitsInRangeOfLineCollision(x1, y1, x2, y2, radius)
+        if x1-x2 == 0 then x1 = x2 + 0.05 end
+        local k = (y1 - y2)/(x1 - x2)
+        local b = y1 - k * x1
+        local group = CreateGroup()
+        GroupEnumUnitsInRange(group, (x1 + x2) / 2, (y1 + y2) / 2, 0.5 * SquareRoot((x1 - x2) ^ 2 + (y1 - y2) ^ 2) + radius + 450, nil)
+        local list = Group2Table(group)
+        DestroyGroup(group)
+        for i, u in ipairs(list) do
+            local distance = (k * GetUnitX(u) + b - GetUnitY(u)) / SquareRoot(1 + k ^ 2)
+            if distance < 0 then distance = -1 * distance end
+            if distance - BlzGetUnitCollisionSize(u) > radius then list[i] = nil end
+        end
+
+        local r = storage:create()
+        for _, v in pairs(list) do
+            r:add(v)
+        end
+
+        return r
+    end
 end
