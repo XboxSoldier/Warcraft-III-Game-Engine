@@ -75,13 +75,20 @@ do
         local arguments = {...}
         if tableNotObject(arguments[1]) then arguments = arguments[1] end
         local current = game
-        for i = 1, #arguments do
-            if ((not create) and (not current[arguments[i]])) or (type(current[arguments[i]]) ~= 'table' and i ~= #arguments) then
-                return nil
-            elseif i ~= #arguments or create then
-                current[arguments[i]] = {}
+        if create then
+            for i = 1, #arguments do
+                if not current[arguments[i]] then current[arguments[i]] = {} end
+                current = current[arguments[i]]
+                if type(current) ~= "table" then
+                    return nil
+                end
             end
-            current = current[arguments[i]]
+        else
+            for i = 1, #arguments do
+                current = current[arguments[i]]
+                if not current then return nil end
+                if i ~= #arguments and type(current) ~= "table" then return nil end
+            end
         end
         return current
     end
@@ -323,11 +330,11 @@ do
         local orginalScore = getScore(parent, self, Effect)
         score(stack, parent, self, Effect)
         if orginalScore <= 0 and getScore(parent, self, Effect) > 0 then
-            local t = aquireGameData(false, parent)
+            local t = aquireGameData(true, parent)
             if not t[self] then t[self] = storage:create() end
             t[self]:add(Effect)
         elseif orginalScore > 0 and getScore(parent, self, Effect) <= 0 then
-            local t = aquireGameData(false, parent)
+            local t = aquireGameData(true, parent)
             if not t[self] then return end
             t[self]:remove(Effect)
         end
@@ -349,7 +356,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters.target), parameters.target}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_BehaviorApplied)
+            local t = aquireGameData(true, parents[i], event_BehaviorApplied)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -366,7 +373,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters.target), parameters.target}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_BehaviorRemoved)
+            local t = aquireGameData(true, parents[i], event_BehaviorRemoved)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -383,7 +390,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters.source), parameters.source}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_BehaviorApplying)
+            local t = aquireGameData(true, parents[i], event_BehaviorApplying)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -400,7 +407,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters.source), parameters.source}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_BehaviorRemoving)
+            local t = aquireGameData(true, parents[i], event_BehaviorRemoving)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -458,7 +465,7 @@ do
     end
 
     function behavior_mt:search(target, name, source)
-        local t = aquireGameData(false, target, "behaviorApplied")
+        local t = aquireGameData(true, target, "behaviorApplied")
         for i = 1, #t do
             if t[i].name == name then
                 if not source then return t[i] end
@@ -570,7 +577,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_UnitInit)
+            local t = aquireGameData(true, parents[i], event_UnitInit)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -587,7 +594,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters[2]), parameters[2]}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_UnitKilled)
+            local t = aquireGameData(true, parents[i], event_UnitKilled)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -604,7 +611,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_UnitKilling)
+            local t = aquireGameData(true, parents[i], event_UnitKilling)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -621,7 +628,7 @@ do
         local effects = storage:create()
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_UnitDecay)
+            local t = aquireGameData(true, parents[i], event_UnitDecay)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -636,7 +643,7 @@ do
         unitGenerate = CreateTrigger()
         unitDeath = CreateTrigger()
         unitDecay = CreateTrigger()
-        local region=CreateRegion()
+        local region = CreateRegion()
         local rect = GetWorldBounds()
         RegionAddRect(region, rect)
         TriggerRegisterEnterRegionSimple(unitGenerate, region)
@@ -694,7 +701,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_1)
+            local t = aquireGameData(true, parents[i], event_Damaging_1)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -711,7 +718,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_2)
+            local t = aquireGameData(true, parents[i], event_Damaging_2)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -728,7 +735,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_3)
+            local t = aquireGameData(true, parents[i], event_Damaging_3)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -745,7 +752,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_4)
+            local t = aquireGameData(true, parents[i], event_Damaging_4)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -762,7 +769,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_5)
+            local t = aquireGameData(true, parents[i], event_Damaging_5)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -779,7 +786,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaging_6)
+            local t = aquireGameData(true, parents[i], event_Damaging_6)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -796,7 +803,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_1)
+            local t = aquireGameData(true, parents[i], event_Damaged_1)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -813,7 +820,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_2)
+            local t = aquireGameData(true, parents[i], event_Damaged_2)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -830,7 +837,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_3)
+            local t = aquireGameData(true, parents[i], event_Damaged_3)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -847,7 +854,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_4)
+            local t = aquireGameData(true, parents[i], event_Damaged_4)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -864,7 +871,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_5)
+            local t = aquireGameData(true, parents[i], event_Damaged_5)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -881,7 +888,7 @@ do
         local effects = storage:create()
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
-            local t = aquireGameData(false, parents[i], event_Damaged_6)
+            local t = aquireGameData(true, parents[i], event_Damaged_6)
             for j = 1, #t do
                 effects:add(t[j])
             end
@@ -968,7 +975,7 @@ do
             parameters.value = parameters.value * damageconstants[AttackTypeToInteger(parameters.attackType) + 1][BlzGetUnitIntegerField(parameters.target.unit, UNIT_IF_DEFENSE_TYPE) + 1]
         end
         if IsUnitType(parameters.target.unit,UNIT_TYPE_ETHEREAL) then
-            parameters.value=parameters.value * ethernalconstants[AttackTypeToInteger(parameters.attackType) + 1]
+            parameters.value = parameters.value * ethernalconstants[AttackTypeToInteger(parameters.attackType) + 1]
         end
 
         if parameters.value == 0.00 then return end
@@ -987,17 +994,17 @@ do
 
         parameters.damageToHull = parameters.value
 
-        if attribute:retireve('shield'):get(parameters.target.unit) > 0 then
-            local shield = attribute:retireve('shield'):get(parameters.target.unit)
+        if attribute_Shield:get(parameters.target.unit) > 0 then
+            local shield = attribute_Shield:get(parameters.target.unit)
             local shieldDamage = parameters.value
             if shieldDamage > shield then shieldDamage = shield end
             parameters.value = parameters.value - shieldDamage
-            attribute:retireve('shield'):change(parameters.target.unit, -1 * shieldDamage)
+            attribute_Shield:change(parameters.target.unit, -1 * shieldDamage)
         end
 
         UnitDamageTarget(parameters.source.unit, parameters.target.unit, parameters.value, false, false, ATTACK_TYPE_CHAOS, DAMAGE_TYPE_UNKNOWN, WEAPON_TYPE_WHOKNOWS)
 
-        if event.value>0 and displayDamageValue then
+        if parameters.value>0 and displayDamageValue then
             local text = I2S(R2I(parameters.value))
             local color = 'ffffffff'
             if parameters.flags:search('DAMAGE_FLAG_ATTACK') then
@@ -1017,7 +1024,7 @@ do
         trigger = CreateTrigger()
         TriggerRegisterAnyUnitEventBJ(trigger, EVENT_PLAYER_UNIT_DAMAGED)
 
-        TriggerAddCondition(trigger,Filter(function()
+        TriggerAddCondition(trigger, Filter(function()
             if GetEventDamage() == 0 or BlzGetEventDamageType() == DAMAGE_TYPE_UNKNOWN then
                 return
             end
