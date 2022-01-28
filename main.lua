@@ -3,7 +3,8 @@ do
     game = {}
 
     -- Settings --
-    local independentStartup = false
+    independentStartup = false
+    displayDamageValue = true
 
     -- Basic Library --
     function group2Table(group)
@@ -995,6 +996,18 @@ do
         end
 
         UnitDamageTarget(parameters.source.unit, parameters.target.unit, parameters.value, false, false, ATTACK_TYPE_CHAOS, DAMAGE_TYPE_UNKNOWN, WEAPON_TYPE_WHOKNOWS)
+
+        if event.value>0 and displayDamageValue then
+            local text = I2S(R2I(parameters.value))
+            local color = 'ffffffff'
+            if parameters.flags:search('DAMAGE_FLAG_ATTACK') then
+                color = 'ffff0000'
+            end
+            if parameters.flags:search('DAMAGE_FLAG_SPELL') then
+                color = 'ffff00ff'
+            end
+            ArcingTextTag('|c' .. color .. text .. '|r', parameters.target.unit)
+        end
 
         event_Damaging_6:apply(parameters)
         event_Damaged_6:apply(parameters)
