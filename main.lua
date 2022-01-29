@@ -80,6 +80,27 @@ do
         return false
     end
 
+    function searchTable(list, item)
+        for i = 1, #list do
+            if item == list[i] then
+                return i
+            end
+        end
+    end
+
+    function addTable(list, ...)
+        local arguments = {...}
+        if tableNotObject(arguments[1]) then arguments = arguments[1] end
+        for i = 1, #arguments do
+            if not searchTable(list, arguments[i]) then list[#list + 1] = arguments[i] end
+        end
+    end
+
+    function removeTable(list, item)
+        local i = searchTable(list, item)
+        if i then table.remove(list, i) end
+    end
+
     -- Game Data --
     function aquireGameData(create, ...)
         local arguments = {...}
@@ -135,13 +156,9 @@ do
         end
     end
 
-    function storage_mt:create(...)
-        local arguments = {...}
-        local this = setmetatable({}, storage_mt)
-        if tableNotObject(arguments[1]) then arguments = arguments[1] end
-        for i = 1, #arguments do
-            this:add(arguments[i])
-        end
+    function storage_mt:create()
+        local this = {}
+        this = setmetatable(this, storage_mt)
         return this
     end
 
@@ -209,7 +226,7 @@ do
         for i = 1, #arguments do
             if type(arguments[i]) == 'string' then this.name = arguments[i] end
             if type(arguments[i]) == 'function' then this.code = arguments[i] end
-            if getmetatable(arguments[i]) == storage_mt then this.valiadors = arguments[i] end
+            if type(arguments[i]) == 'table' then this.valiadors = arguments[i] end
         end
         effect_array[this.name] = this
         return this
@@ -258,23 +275,23 @@ do
 
     function attribute_mt:initEffect(item)
         if not self.initEffects then
-            self.initEffects = storage:create()
+            self.initEffects = {}
         end
-        self.initEffects:add(item)
+        addTable(self.initEffects, item)
     end
 
     function attribute_mt:removeEffect(item)
         if not self.removeEffects then
-            self.removeEffects = storage:create()
+            self.removeEffects = {}
         end
-        self.removeEffects:add(item)
+        addTable(self.removeEffects, item)
     end
 
     function attribute_mt:changeEffect(item)
         if not self.changeEffects then
-            self.changeEffects = storage:create()
+            self.changeEffects = {}
         end
-        self.changeEffects:add(item)
+        addTable(self.changeEffects, item)
     end
 
     function attribute_mt:change(parent, value)
@@ -332,12 +349,12 @@ do
         score(stack, parent, self, Effect)
         if orginalScore <= 0 and getScore(parent, self, Effect) > 0 then
             local t = aquireGameData(true, parent)
-            if not t[self] then t[self] = storage:create() end
-            t[self]:add(Effect)
+            if not t[self] then t[self] = {} end
+            addTable(t[self], Effect)
         elseif orginalScore > 0 and getScore(parent, self, Effect) <= 0 then
             local t = aquireGameData(false, parent)
             if not t[self] then return end
-            t[self]:remove(Effect)
+            removeTable(t[self], Effect)
         end
     end
 
@@ -347,76 +364,76 @@ do
     local behavior_mt = getmetatable(behavior)
     behavior_mt.__index = behavior_mt
 
-    local behavior_storage = storage:create()
+    local behavior_storage = {}
     local filtering = false
-    local pending = storage:create()
+    local pending = {}
 
     event_BehaviorApplied = event:create('BehaviorApplied', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters.target), parameters.target}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_BehaviorApplied)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_BehaviorRemoved = event:create('BehaviorRemoved', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters.target), parameters.target}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_BehaviorRemoved)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_BehaviorApplying = event:create('BehaviorApplying', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters.source), parameters.source}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_BehaviorApplying)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_BehaviorRemoving = event:create('BehaviorRemoving', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters.source), parameters.source}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_BehaviorRemoving)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     function behavior_mt:create(...)
@@ -425,11 +442,11 @@ do
         setmetatable(parameters, behavior_mt)
         table.insert(behavior_storage, parameters)
         local t = aquireGameData(true, parameters.source)
-        if not t.behaviorApplying then t.behaviorApplying = storage:create() end
-        t.behaviorApplying:add(parameters)
+        if not t.behaviorApplying then t.behaviorApplying = {} end
+        addTable(t.behaviorApplying, parameters)
         t = aquireGameData(true, parameters.target)
-        if not t.behaviorApplied then t.behaviorApplied = storage:create() end
-        t.behaviorApplied:add(parameters)
+        if not t.behaviorApplied then t.behaviorApplied = {} end
+        addTable(t.behaviorApplied, parameters)
         if parameters.linkBuff then
             score(1, parameters.target, "buffs", parameters.linkBuff)
             if getScore(parameters.target, "buffs", parameters.linkBuff) > 0 and not UnitHasBuffBJ(parameters.target, FourCC(parameters.linkBuff)) then
@@ -454,15 +471,15 @@ do
             end
         end
         local t = aquireGameData(true, self.source, 'behaviorApplying')
-        t:remove(self)
+        removeTable(t, self)
         t = aquireGameData(true, self.target, 'behaviorApplied')
-        t:remove(self)
-        behavior_storage:remove(self)
+        removeTable(t, self)
+        removeTable(behavior_storage, self)
         self = nil
     end
 
     function behavior_mt:finish()
-        pending:add(self)
+        addTable(pending, self)
     end
 
     function behavior_mt:search(target, name, source)
@@ -478,9 +495,8 @@ do
     function behavior_mt:destroyPending()
         if filtering then return end
         while #pending > 0 do
-            local list = pending:convert()
-            pending:destroy()
-            pending = storage:create()
+            local list = table.move(pending, 1, #pending, 1)
+            pending = {}
             for i = 1, #list do
                 list[i]:destroy()
             end
@@ -492,7 +508,7 @@ do
         TimerStart(timer, TICK, true, function()
             behavior:destroyPending()
 
-            local t = behavior_storage:convert()
+            local t = table.move(behavior_storage, 1, #pending, 1)
 
             filtering = true
             for k, v in ipairs(t) do
@@ -518,8 +534,7 @@ do
 
             behavior:destroyPending()
 
-            t = nil
-            t = behavior_storage:convert()
+            t = table.move(behavior_storage, 1, #pending, 1)
 
             filtering = true
             for k, v in pairs(t) do
@@ -575,69 +590,69 @@ do
     event_UnitInit = event:create('UnitInit', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_UnitInit)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_UnitKilled = event:create('UnitKilled', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters[2]), parameters[2]}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_UnitKilled)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_UnitKilling = event:create('UnitKilling', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_UnitKilling)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_UnitDecay = event:create('UnitDecay', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', GetOwningPlayer(parameters[1]), parameters[1]}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_UnitDecay)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     onInitialization(function()
@@ -702,205 +717,205 @@ do
     event_Damaging_1 = event:create('Damaging1', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_1)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaging_2 = event:create('Damaging2', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_2)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaging_3 = event:create('Damaging3', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_3)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaging_4 = event:create('Damaging4', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_4)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaging_5 = event:create('Damaging5', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_5)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaging_6 = event:create('Damaging6', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.source.player, parameters.source.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaging_6)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_1 = event:create('Damaged1', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_1)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_2 = event:create('Damaged2', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_2)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_3 = event:create('Damaged3', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_3)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_4 = event:create('Damaged4', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_4)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_5 = event:create('Damaged5', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_5)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     event_Damaged_6 = event:create('Damaged6', function(...)
         local parameters = {...}
         if tableNotObject(parameters[1]) then parameters = parameters[1] end
-        local effects = storage:create()
+        local effects = {}
         local parents = {'global', parameters.target.player, parameters.target.unit}
         for i = 1, #parents do
             local t = aquireGameData(true, parents[i], event_Damaged_6)
             for j = 1, #t do
-                effects:add(t[j])
+                addTable(effects, t[j])
             end
         end
         for i = 1, #effects do
             effects[i]:apply(parameters)
         end
-        effects:destroy()
+        effects = nil
     end)
 
     local function ConvertDamageCat(damagetype)
@@ -943,7 +958,7 @@ do
         parameters.damageToHull = value
         parameters.attackType = attackType
         parameters.damageType = damageType
-        parameters.flags = flags or storage:create()
+        parameters.flags = flags or {}
 
         parameters.source.unit = source
         parameters.source.player = GetOwningPlayer(source)
@@ -968,9 +983,9 @@ do
         event_Damaging_1:apply(parameters)
         event_Damaged_1:apply(parameters)
 
-        if parameters.flags:search('DAMAGE_FLAG_ATTACK') and not parameters.ignorarmor then
+        if searchTable(parameters.flags, 'DAMAGE_FLAG_ATTACK') and not parameters.ignorarmor then
             if BlzGetUnitArmor(parameters.target.unit) > 0 then
-                parameters.value = parameters.value * (1.00- ((BlzGetUnitArmor(parameters.target.unit) * 0.06) / (BlzGetUnitArmor(parameters.target.unit) * 0.06 +1 )))
+                parameters.value = parameters.value * (1.00 - ((BlzGetUnitArmor(parameters.target.unit) * 0.06) / (BlzGetUnitArmor(parameters.target.unit) * 0.06 + 1 )))
             elseif BlzGetUnitArmor(parameters.target.unit) < 0 then
                 parameters.value = parameters.value * (2- ( 0.94 ^ (-1 * BlzGetUnitArmor(parameters.target.unit))))
             end
@@ -1011,10 +1026,10 @@ do
         if parameters.value>0 and displayDamageValue then
             local text = I2S(R2I(parameters.value))
             local color = 'ffffffff'
-            if parameters.flags:search('DAMAGE_FLAG_ATTACK') then
+            if searchTable(parameters.flags, 'DAMAGE_FLAG_ATTACK') then
                 color = 'ffff0000'
             end
-            if parameters.flags:search('DAMAGE_FLAG_SPELL') then
+            if searchTable(parameters.flags, 'DAMAGE_FLAG_SPELL') then
                 color = 'ffff00ff'
             end
             ArcingTextTag('|c' .. color .. text .. '|r', parameters.target.unit)
@@ -1038,14 +1053,14 @@ do
                 return
             end
 
-            local flags = storage:create()
+            local flags = {}
             if BlzGetEventAttackType() == ATTACK_TYPE_NORMAL then
-                flags:add("DAMAGE_FLAG_SPELL")
+                addTable(flags, "DAMAGE_FLAG_SPELL")
             else
-                flags:add("DAMAGE_FLAG_ATTACK")
+                addTable(flags, "DAMAGE_FLAG_ATTACK")
             end
 
-            flags:add(ConvertDamageCat(BlzGetEventDamageType()))
+            addTable(flags, ConvertDamageCat(BlzGetEventDamageType()))
 
             DamageUnit(GetEventDamageSource(), GetTriggerUnit(), GetEventDamage(), BlzGetEventAttackType(), BlzGetEventDamageType(), flags)
 
@@ -1100,7 +1115,7 @@ do
     end
 
     function filterTable(t,f,p)
-        local r = storage:create()
+        local r = {}
         local e = {}
         for k, v in ipairs(f) do
             if v=="ally" then
@@ -1141,7 +1156,7 @@ do
                     break
                 end
             end
-            if access then r:add(v) end
+            if access then addTable(r, v) end
         end
         return r
     end
@@ -1157,8 +1172,8 @@ do
             if distance - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
         end
 
-        local r = storage:create()
-        for _, v in ipairs(list) do r:add(v) end
+        local r = {}
+        for _, v in ipairs(list) do addTable(r, v) end
 
         return r
     end
@@ -1176,9 +1191,9 @@ do
             if distance - BlzGetUnitCollisionSize(unit) - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
         end
 
-        local r = storage:create()
+        local r =  {}
         for _, v in ipairs(list) do
-            r:add(v)
+            addTable(r, v)
         end
 
         return r
@@ -1198,9 +1213,9 @@ do
             if distance - BlzGetUnitCollisionSize(u) > radius then list[i] = nil end
         end
 
-        local r = storage:create()
+        local r = {}
         for _, v in pairs(list) do
-            r:add(v)
+            addTable(r, v)
         end
 
         return r
