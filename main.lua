@@ -46,19 +46,29 @@ do
     -- Init --
     if independentStartup then
         local init_array = {}
+        local init_array2 = {}
         local init_old = InitBlizzard
         onInitialization = function(code)
             if type(code) == 'function' then table.insert(init_array, code) end
+        end
+        onStartUp = function(code)
+            if type(code) == 'function' then table.insert(init_array2, code) end
         end
         InitBlizzard = function()
             init_old()
             for i = 1, #init_array do
                 init_array[i]()
             end
+            for i = 1, #init_array do
+                init_array2[i]()
+            end
         end
     else
         onInitialization = function(code)
             onInit(code)
+        end
+        onStartUp = function(code)
+            onStart(code)
         end
     end
 
@@ -77,15 +87,17 @@ do
         local current = game
         if create then
             for i = 1, #arguments do
-                if not current[arguments[i]] then current[arguments[i]] = {} end
-                current = current[arguments[i]]
+                local k = arguments[i]
+                if not current[k] then current[k] = {} end
+                current = current[k]
                 if type(current) ~= "table" then
                     return nil
                 end
             end
         else
             for i = 1, #arguments do
-                current = current[arguments[i]]
+                local k = arguments[i]
+                current = current[k]
                 if not current then return nil end
                 if i ~= #arguments and type(current) ~= "table" then return nil end
             end
@@ -95,11 +107,11 @@ do
 
     function writeGameData(value, ...)
         local arguments = {...}
-        local item = arguments[-1]
         if tableNotObject(arguments[1]) then arguments = arguments[1] end
+        local item = arguments[#arguments]
         table.remove(arguments)
         local current = aquireGameData(true, arguments)
-        if current then current[item] = value end
+        if type(current) == 'table' then current[item] = value end
     end
 
     -- Storage --
@@ -107,10 +119,25 @@ do
     local storage_mt = getmetatable(storage)
     storage_mt.__index = storage_mt
 
+    function storage_mt:search(item)
+        for i = 1, #self do
+            if item == self[i] then
+                return i
+            end
+        end
+    end
+
+    function storage_mt:add(...)
+        local arguments = {...}
+        if tableNotObject(arguments[1]) then arguments = arguments[1] end
+        for i = 1, #arguments do
+            if not self:search(arguments[i]) then self[#self + 1] = arguments[i] end
+        end
+    end
+
     function storage_mt:create(...)
         local arguments = {...}
-        local this = {}
-        setmetatable(this, storage_mt)
+        local this = setmetatable({}, storage_mt)
         if tableNotObject(arguments[1]) then arguments = arguments[1] end
         for i = 1, #arguments do
             this:add(arguments[i])
@@ -118,31 +145,8 @@ do
         return this
     end
 
-    function storage_mt:add(...)
-        local arguments = {...}
-        if tableNotObject(arguments[1]) then arguments = arguments[1] end
-        for i = 1, #arguments do
-            local b = true
-            for j = 1, #self do
-                if arguments[i] == self[j] then
-                    b = false
-                    break
-                end
-            end
-            if b then table.insert(self, arguments[i]) end
-        end
-    end
-
     function storage_mt:destroy()
         self = nil
-    end
-
-    function storage_mt:search(item)
-        for i = 1, #self do
-            if item == self[i] then
-                return i
-            end
-        end
     end
 
     function storage_mt:remove(item)
@@ -224,12 +228,9 @@ do
 
     -- Score --
     function score(value, ...)
-        local arguments = {...}
-        local item = arguments[-1]
-        table.remove(arguments)
-        local list = aquireGameData(true, arguments)
-        if type(list[item]) ~= 'number' and list[item] ~= nil then return end
-        list[item] = (list[item] or 0) + value
+        local item = aquireGameData(false, ...)
+        if item and type(item) ~= 'number' then return end
+        writeGameData((aquireGameData(false, ...) or 0) + value, ...)
     end
 
     function getScore(...)
@@ -334,7 +335,7 @@ do
             if not t[self] then t[self] = storage:create() end
             t[self]:add(Effect)
         elseif orginalScore > 0 and getScore(parent, self, Effect) <= 0 then
-            local t = aquireGameData(true, parent)
+            local t = aquireGameData(false, parent)
             if not t[self] then return end
             t[self]:remove(Effect)
         end
@@ -667,6 +668,9 @@ do
             event_UnitDecay:apply(unit)
             game[unit]=nil
         end))
+    end)
+
+    onStartUp(function()
         for i = 0, bj_MAX_PLAYER_SLOTS - 1 do
             local group = CreateGroup()
             GroupEnumUnitsOfPlayer(group, Player(i), Filter(function()
@@ -1144,12 +1148,12 @@ do
 
     function getUnitsInRangeCollision(x, y, radius)
         local group = CreateGroup()
-        GroupEnumUnitsInRange(group, x, y, radius+450, nil)
+        GroupEnumUnitsInRange(group, x, y, radius + 450, nil)
         local list = Group2Table(group)
         DestroyGroup(group)
 
         for k, v in ipairs(list) do
-            local distance = SquareRoot((x-GetUnitX(v)) ^ 2 + (y-GetUnitY(v)) ^ 2)
+            local distance = SquareRoot((x - GetUnitX(v)) ^ 2 + (y - GetUnitY(v)) ^ 2)
             if distance - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
         end
 
@@ -1163,12 +1167,12 @@ do
         local group = CreateGroup()
         local x = GetUnitX(unit)
         local y = GetUnitY(unit)
-        GroupEnumUnitsInRange(group, x, y, radius+450, nil)
+        GroupEnumUnitsInRange(group, x, y, radius + 450, nil)
         local list = Group2Table(group)
         DestroyGroup(group)
 
         for k, v in ipairs(list) do
-            local distance = SquareRoot((x-GetUnitX(v)) ^ 2 + (y-GetUnitY(v)) ^ 2)
+            local distance = SquareRoot((x - GetUnitX(v)) ^ 2 + (y - GetUnitY(v)) ^ 2)
             if distance - BlzGetUnitCollisionSize(unit) - BlzGetUnitCollisionSize(v) > radius then list[k] = nil end
         end
 
@@ -1181,8 +1185,8 @@ do
     end
 
     function getUnitsInRangeOfLineCollision(x1, y1, x2, y2, radius)
-        if x1-x2 == 0 then x1 = x2 + 0.05 end
-        local k = (y1 - y2)/(x1 - x2)
+        if x1 - x2 == 0 then x1 = x2 + 0.05 end
+        local k = (y1 - y2) / (x1 - x2)
         local b = y1 - k * x1
         local group = CreateGroup()
         GroupEnumUnitsInRange(group, (x1 + x2) / 2, (y1 + y2) / 2, 0.5 * SquareRoot((x1 - x2) ^ 2 + (y1 - y2) ^ 2) + radius + 450, nil)
