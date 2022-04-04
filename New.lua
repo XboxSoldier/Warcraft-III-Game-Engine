@@ -1,3 +1,4 @@
+-- Basic Data Methods
 do
     local old = type
     function type(v)
@@ -45,6 +46,7 @@ do
     end
 end
 
+-- Array
 do
     Array = {type = 'array'}
 
@@ -146,6 +148,7 @@ do
         for k, v in through(self) do
             func(v, k, ...)
         end
+        return self
     end
 
     function Array:unpack()
@@ -153,6 +156,7 @@ do
     end
 end
 
+-- Set
 do
     Set = {type = 'set'}
 
@@ -206,12 +210,14 @@ do
         for j = i, self.size do
             self._entries[self._values[j]] = j
         end
+        return self
     end
 
     function Set:clear()
         self._values = {}
         self._entries = {}
         self.size = 0
+        return self
     end
 
     function Set:entries()
@@ -225,6 +231,7 @@ do
         for k, v in through(self) do
             func(v, k, ...)
         end
+        return self
     end
 
     function Set:unpack()
@@ -232,6 +239,7 @@ do
     end
 end
 
+-- Map
 do
     Map = { type = 'map' }
 
@@ -292,6 +300,7 @@ do
             self._entries[key] = self.size
         end
         self._values[self._entries[key]] = value
+        return self
     end
 
     function Map:has(key)
@@ -303,6 +312,7 @@ do
         self._keys = {}
         self._values = {}
         self.size = 0
+        return self
     end
 
     function Map:delete(key)
@@ -338,9 +348,11 @@ do
         for k, v in through(self) do
             func(v, k, ...)
         end
+        return self
     end
 end
 
+-- storage
 do
     local storage = Map()
 
@@ -390,6 +402,7 @@ do
     end
 end
 
+-- Timer
 do
     Timer = { type = 'timer' }
 
@@ -423,15 +436,18 @@ do
 
     function Timer:setFlag(flag)
         self.status.flags:add(flag)
+        return self
     end
 
     function Timer:removeFlag(flag)
         self.status.flags:delete(flag)
+        return self
     end
 
     function Timer:finish()
         activeTimers:delete(self)
         garbageBin:add(self)
+        return self
     end
 
     function Timer:recycle()
@@ -460,6 +476,7 @@ do
                 activeTimers:delete(self)
             end
         end
+        return self
     end
 
     init(function()
@@ -474,6 +491,7 @@ do
     end)
 end
 
+-- Valiador
 do
     Valiador = { type = 'valiador' }
 
@@ -497,6 +515,7 @@ do
     end
 end
 
+-- Effect
 do
     Effect = { type = 'effect' }
 
@@ -518,13 +537,15 @@ do
 
     function Effect.__call(this, parameters)
         for _, v in through(this.valiadors) do
-            if not v(parameters) then return end
+            if not v(parameters) then return false end
         end
         this.func(parameters)
+        return true
     end
 
     function Effect:addValiador(valiador)
         self.valiadors:add(valiador)
+        return self
     end
 end
 
@@ -549,6 +570,7 @@ do
     end
 end
 
+-- Event
 do
     Event = { type = 'event' }
 
@@ -592,9 +614,11 @@ do
         if old > 0 then
             addStoredItem(parent, 'events', self, effect)
         end
+        return self
     end
 end
 
+-- Attribute
 do
     Attribute = { type = 'attribute' }
 
@@ -618,14 +642,17 @@ do
 
     function Attribute:newInit(effect)
         self.init:add(effect)
+        return self
     end
 
     function Attribute:newChange(effect)
         self.change:add(effect)
+        return self
     end
 
     function Attribute:newRemove(effect)
         self.remove:add(effect)
+        return self
     end
 
     function Attribute:get(parent)
@@ -663,9 +690,11 @@ do
                 v(event)
             end
         end
+        return event.after
     end
 end
 
+-- Behavior
 do
     Behavior = { type = 'behavior' }
 
@@ -717,15 +746,18 @@ do
 
     function Behavior:setFlag(flag)
         self.flags:add(flag)
+        return self
     end
 
     function Behavior:removeFlag(flag)
         self.flags:delete(flag)
+        return self
     end
 
     function Behavior:finish()
         self.flags:add('finished')
         garbageBin:add(self)
+        return self
     end
 
     function Behavior:destroy()
@@ -795,4 +827,204 @@ do
         end)
         timer:setFlag('global')
     end)
+end
+
+-- Units
+do
+    units = Set()
+
+    destructables = Set()
+
+    projectiles = Set()
+
+    specialEffects = Set()
+end
+
+-- Map Bounds
+do
+    MapBounds = setmetatable({}, {})
+
+    WorldBounds = setmetatable({}, getmetatable(MapBounds))
+
+    local mt = getmetatable(MapBounds)
+    mt.__index = mt
+
+    function mt:getRandomX()
+        return GetRandomReal(self.minX, self.maxX)
+    end
+
+    function mt:getRandomY()
+        return GetRandomReal(self.minY, self.maxY)
+    end
+
+    local function GetBoundedValue(bounds, v, minV, maxV, margin)
+        margin = margin or 0.00
+
+        if v < (bounds[minV] + margin) then
+            return bounds[minV] + margin
+        elseif v > (bounds[maxV] - margin) then
+            return bounds[maxV] - margin
+        end
+
+        return v
+    end
+
+    function mt:getBoundedX(x, margin)
+        return GetBoundedValue(self, x, "minX", "maxX", margin)
+    end
+
+    function mt:getBoundedY(y, margin)
+        return GetBoundedValue(self, y, "minY", "maxY", margin)
+    end
+
+    function mt:containsX(x)
+        return self:getBoundedX(x) == x
+    end
+
+    function mt:containsY(y)
+        return self:getBoundedY(y) == y
+    end
+
+    local function InitData(bounds)
+        bounds.region = CreateRegion()
+        bounds.minX = GetRectMinX(bounds.rect)
+        bounds.minY = GetRectMinY(bounds.rect)
+        bounds.maxX = GetRectMaxX(bounds.rect)
+        bounds.maxY = GetRectMaxY(bounds.rect)
+        bounds.centerX = (bounds.minX + bounds.maxX) / 2.00
+        bounds.centerY = (bounds.minY + bounds.maxY) / 2.00
+        RegionAddRect(bounds.region, bounds.rect)
+    end
+
+    local oldInit = InitGlobals
+    function InitGlobals()
+        oldInit()
+
+        MapBounds.rect = bj_mapInitialPlayableArea
+        WorldBounds.rect = GetWorldBounds()
+
+        InitData(MapBounds)
+        InitData(WorldBounds)
+    end
+end
+
+-- Dummy
+do
+    Dummy = setmetatable({}, { __call = function(this, unit, ability, order, level)
+        local dummy = Dummy:retrieve(GetOwningPlayer(unit), 0, 0, 0, 0)
+        UnitAddAbility(dummy, ability)
+        SetUnitAbilityLevel(dummy, ability, level)
+        IssueTargetOrder(dummy, order, unit)
+        UnitRemoveAbility(dummy, ability)
+        Dummy:recycle(dummy)
+    end })
+
+    dummies = Set()
+
+    local player = Player(PLAYER_NEUTRAL_PASSIVE)
+    local DUMMY = FourCC('U000')
+
+    function Dummy:recycle(unit)
+        if GetUnitTypeId(unit) ~= DUMMY then
+            print("[DummyPool] Error: Trying to recycle a non dummy unit")
+        else
+            dummies:add(unit)
+            SetUnitX(unit, WorldBounds.maxX)
+            SetUnitY(unit, WorldBounds.maxY)
+            SetUnitOwner(unit, player, false)
+            ShowUnit(unit, false)
+            BlzPauseUnitEx(unit, true)
+        end
+    end
+
+    function Dummy:retrieve(owner, x, y, z, face)
+        local dummy = nil
+        if dummies.size > 0 then
+            dummy = dummies[dummies.size - 1]
+            dummies:delete(dummy)
+            BlzPauseUnitEx(dummy, false)
+            ShowUnit(dummy, true)
+            SetUnitX(dummy, x)
+            SetUnitY(dummy, y)
+            SetUnitFlyHeight(dummy, z, 0)
+            BlzSetUnitFacingEx(dummy, face * bj_RADTODEG)
+            SetUnitOwner(dummy, owner, false)
+        else
+            dummy = CreateUnit(owner, DUMMY, x, y, face * bj_RADTODEG)
+            SetUnitFlyHeight(dummy, z, 0)
+        end
+
+        return dummy
+    end
+
+    function Dummy:timed(unit, delay)
+        local timer = Timer()
+        if GetUnitTypeId(unit) ~= DUMMY then
+            print("[DummyPool] Error: Trying to recycle a non dummy unit")
+        else
+            timer:start(delay, false, Map(Array('unit', unit)), function(parameters, this)
+                dummies:add(parameters.unit)
+                SetUnitX(parameters.unit, WorldBounds.maxX)
+                SetUnitY(parameters.unit, WorldBounds.maxY)
+                SetUnitOwner(parameters.unit, player, false)
+                ShowUnit(parameters.unit, false)
+                BlzPauseUnitEx(parameters.unit, true)
+                this:finish()
+            end)
+        end
+    end
+end
+
+-- Event Generator
+do
+    EventGenerator = { type = 'event generator' }
+
+    eventGenerators = Map()
+
+    local triggers = Map()
+
+    eventGeneratorMT = { __call = function(this, type, event, parameters)
+        if eventGenerators:has(event) then return eventGenerators[event] end
+        local newEventGenerator = {}
+        newEventGenerator.event = event
+        newEventGenerator.parameters = parameters
+        newEventGenerator.trigger = CreateTrigger()
+        newEventGenerator.source = type
+        triggers:set(newEventGenerator.trigger, newEventGenerator)
+        if type == 'unit' then
+            RegisterAnyUnitEvent(newEventGenerator.trigger, event)
+        else
+            RegisterPlayerEvent(newEventGenerator.trigger, event)
+        end
+        TriggerAddAction(newEventGenerator.trigger, function()
+            local eventGenerator = triggers[GetTriggeringTrigger()]
+            local arguments = Map()
+            for k, v in through(eventGenerator.parameters) do
+                arguments:set(k, v())
+            end
+            local events = eventGenerator.events
+            for _, v in through(events) do
+                local parents = Array()
+                if eventGenerator.source == 'unit' then
+                    parents:unshift(eventGenerator.directParents[v]())
+                    parents:unshift(GetOwningPlayer(parents[0]))
+                else
+                    parents[0] = eventGenerator.directParents[v]()
+                end
+                v(parents, arguments)
+            end
+        end)
+        newEventGenerator.events = Set()
+        newEventGenerator.directParents = Map()
+        setmetatable(newEventGenerator, EventGenerator)
+        eventGenerators:set(event, newEventGenerator)
+        return newEventGenerator
+    end }
+
+    EventGenerator.__call = function(this, name, directParent)
+        local event = Event(name)
+        this.events:add(event)
+        this.directParents[event] = directParent
+        return event
+    end
 end
