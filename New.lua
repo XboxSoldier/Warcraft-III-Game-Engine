@@ -1,3 +1,8 @@
+-- Debug
+do
+    debugCount = 0
+end
+
 -- Basic Data Methods
 do
     local old = type
@@ -354,11 +359,11 @@ end
 
 -- storage
 do
-    local storage = Map()
+    gameStorage = Map()
 
     function getStorage(fill, fallback, ...)
         local arguments = Array(...)
-        local current = storage
+        local current = gameStorage
         for i = 0, arguments.length - 2 do
             if current[arguments[i]] == nil then
                 if fill then current[arguments[i]] = Map()
@@ -396,6 +401,7 @@ do
 
     function InitBlizzard()
         old()
+        if debugCount ~= 0 then print(debugCount) end
         for _,v in through(list) do
             v()
         end
@@ -455,14 +461,7 @@ do
         ::recycle::
         array = garbageBin:entries()
         garbageBin:clear()
-        for _, v in through(array) do
-            v:destroy()
-        end
         if garbageBin.size > 0 then goto recycle end
-    end
-
-    function Timer:destroy()
-        self = nil
     end
 
     function Timer:tick()
@@ -719,6 +718,12 @@ do
         behaviors:add(newBehavior)
         getStorage(true, Set(), newBehavior.source, 'behaviors'):add(newBehavior)
         getStorage(true, Set(), newBehavior.target, 'behaviods'):add(newBehavior)
+        if newBehavior.linkedBuff ~= nil then
+            print(score(newBehavior.target, 'buffs', newBehavior.linkedBuff, 1))
+            if getScore(newBehavior.target, 'buffs', newBehavior.linkedBuff) > 0 then
+                Dummy(newBehavior.target, newBehavior.linkedBuffAbility, newBehavior.linkedBuffOrder, 1)
+            end
+        end
         EVENT_BEHAVIOR_APPLY(Array(GetOwningPlayer(newBehavior.source), newBehavior.source), newBehavior)
         EVENT_BEHAVIOR_APPLIED(Array(GetOwningPlayer(newBehavior.target), newBehavior.target), newBehavior)
         return newBehavior
@@ -764,12 +769,17 @@ do
         getStorage(true, Set(), self.source, 'behaviors'):delete(self)
         getStorage(true, Set(), self.target, 'behaviods'):delete(self)
         behaviors:delete(self)
+        if self.linkedBuff ~= nil then
+            print(score(self.target, 'buffs', self.linkedBuff, -1))
+            if getScore(self.target, 'buffs', self.linkedBuff) <= 0 then
+                UnitRemoveBuffBJ(self.linkedBuff, self.target)
+            end
+        end
         for _, v in through(self.finishEffects) do
             v(self)
         end
         EVENT_BEHAVIOR_REMOVE(Array(GetOwningPlayer(self.source), self.source), self)
         EVENT_BEHAVIOR_REMOVED(Array(GetOwningPlayer(self.target), self.target), self)
-        self = nil
     end
 
     function Behavior:recycle()
@@ -806,10 +816,24 @@ do
 
     init(function()
         local timer = Timer()
-        timer:start(0, true, Map(), function(parameters)
+        timer:start(TICK, true, Map(), function(parameters)
             Behavior:recycle()
             local array = behaviors:entries()
             for _, i in through(array) do
+                if (not units:has(i.source)) or (not units:has(i.target)) then
+                    i:finish()
+                    goto exit
+                end
+                if i.linkedBuff and (not UnitHasBuffBJ(i.target, i.linkedBuff)) then
+                    if i.buffLocked then
+                        i:finish()
+                        goto exit
+                    else
+                        if getScore(i.target, 'buffs', i.linkedBuff) > 0 then
+                            Dummy(i.target, i.linkedBuffAbility, i.linkedBuffOrder, 1)
+                        end
+                    end
+                end
                 for _, v in through(i.valiadors) do
                     if not v(i) then
                         i:finish()
@@ -833,10 +857,13 @@ end
 do
     units = Set()
 
+    destructableAbility = FourCC('A000')
     destructables = Set()
 
+    projectileAbility = FourCC('A001')
     projectiles = Set()
 
+    specialEffectAbility = FourCC('A002')
     specialEffects = Set()
 end
 
@@ -910,6 +937,11 @@ end
 
 -- Dummy
 do
+    dummies = Set()
+
+    local player = Player(PLAYER_NEUTRAL_PASSIVE)
+    local DUMMY = FourCC('U000')
+
     Dummy = setmetatable({}, { __call = function(this, unit, ability, order, level)
         local dummy = Dummy:retrieve(GetOwningPlayer(unit), 0, 0, 0, 0)
         UnitAddAbility(dummy, ability)
@@ -918,11 +950,6 @@ do
         UnitRemoveAbility(dummy, ability)
         Dummy:recycle(dummy)
     end })
-
-    dummies = Set()
-
-    local player = Player(PLAYER_NEUTRAL_PASSIVE)
-    local DUMMY = FourCC('U000')
 
     function Dummy:recycle(unit)
         if GetUnitTypeId(unit) ~= DUMMY then
@@ -977,14 +1004,39 @@ end
 
 -- Event Generator
 do
-    EventGenerator = { type = 'event generator' }
+    EventGenerator = { type = 'eventGenerator' }
 
     eventGenerators = Map()
 
     local triggers = Map()
 
+    local function triggerEvent()
+        local eventGenerator = triggers[GetTriggeringTrigger()]
+        local arguments = Map()
+        for k, v in through(eventGenerator.parameters) do
+            arguments:set(k, v())
+        end
+        local events = eventGenerator.events
+        for _, v in through(events) do
+            if not eventGenerator.directParents[v]() then goto exit end
+            local parents = Array()
+            if eventGenerator.source == 'unit' then
+                parents:unshift(eventGenerator.directParents[v]())
+                parents:unshift(GetOwningPlayer(parents[0]))
+            else
+                parents[0] = eventGenerator.directParents[v]()
+            end
+            v(parents, arguments)
+            ::exit::
+        end
+    end
+
+    local func = Filter(triggerEvent)
+
     eventGeneratorMT = { __call = function(this, type, event, parameters)
-        if eventGenerators:has(event) then return eventGenerators[event] end
+        if eventGenerators:has(event) then
+            return eventGenerators[event]
+        end
         local newEventGenerator = {}
         newEventGenerator.event = event
         newEventGenerator.parameters = parameters
@@ -992,28 +1044,11 @@ do
         newEventGenerator.source = type
         triggers:set(newEventGenerator.trigger, newEventGenerator)
         if type == 'unit' then
-            RegisterAnyUnitEvent(newEventGenerator.trigger, event)
+            TriggerRegisterAnyUnitEventBJ(newEventGenerator.trigger, event)
         else
-            RegisterPlayerEvent(newEventGenerator.trigger, event)
+            TriggerRegisterPlayerEvent(newEventGenerator.trigger, event)
         end
-        TriggerAddAction(newEventGenerator.trigger, function()
-            local eventGenerator = triggers[GetTriggeringTrigger()]
-            local arguments = Map()
-            for k, v in through(eventGenerator.parameters) do
-                arguments:set(k, v())
-            end
-            local events = eventGenerator.events
-            for _, v in through(events) do
-                local parents = Array()
-                if eventGenerator.source == 'unit' then
-                    parents:unshift(eventGenerator.directParents[v]())
-                    parents:unshift(GetOwningPlayer(parents[0]))
-                else
-                    parents[0] = eventGenerator.directParents[v]()
-                end
-                v(parents, arguments)
-            end
-        end)
+        TriggerAddCondition(newEventGenerator.trigger, func)
         newEventGenerator.events = Set()
         newEventGenerator.directParents = Map()
         setmetatable(newEventGenerator, EventGenerator)
@@ -1021,10 +1056,235 @@ do
         return newEventGenerator
     end }
 
+    setmetatable(EventGenerator, eventGeneratorMT)
+
     EventGenerator.__call = function(this, name, directParent)
         local event = Event(name)
         this.events:add(event)
         this.directParents[event] = directParent
         return event
     end
+end
+
+-- Above have been tested to perform nicely.
+-- WARNING!
+-- Below are not yet tested. Further testing is still required.
+
+-- Internal Events
+do
+    -- Unit Attack
+    EventGenerator('unit', EVENT_PLAYER_UNIT_ATTACKED, Map(Array(Array('source', GetAttacker), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_ATTACKED]('unitAttack', GetAttacker)
+    eventGenerators[EVENT_PLAYER_UNIT_ATTACKED]('unitAttacked', GetTriggerUnit)
+
+    -- Unit Killed
+    EventGenerator('unit', EVENT_PLAYER_UNIT_DEATH, Map(Array(Array('source', GetKillingUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_DEATH]('unitKill', GetAttacker)
+    eventGenerators[EVENT_PLAYER_UNIT_DEATH]('unitKilled', GetTriggerUnit)
+
+    -- Unit Decay
+    EventGenerator('unit', EVENT_PLAYER_UNIT_DECAY, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_DECAY]('unitDecay', GetTriggerUnit)
+
+    -- Unit Construct
+    EventGenerator('unit', EVENT_PLAYER_UNIT_CONSTRUCT_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetConstructingStructure))))
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_START]('unitStartConstruction', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_START]('unitStartConstructed', GetConstructingStructure)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetCancelledStructure))))
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL]('unitCancelConstruction', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL]('unitCancelConstructed', GetCancelledStructure)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, Map(Array(Array('source', GetTriggerUnit), Array('target', GetConstructedStructure))))
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_FINISH]('unitFinishConstruction', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_CONSTRUCT_FINISH]('unitFinishConstructed', GetConstructedStructure)
+
+    -- Unit Upgrade
+    EventGenerator('unit', EVENT_PLAYER_UNIT_UPGRADE_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_UPGRADE_START]('unitStartUpgrade', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_UPGRADE_CANCEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_UPGRADE_CANCEL]('unitCancelUpgrade', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_UPGRADE_FINISH, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_UPGRADE_FINISH]('unitFinishUpgrade', GetTriggerUnit)
+
+    -- Unit Train
+    EventGenerator('unit', EVENT_PLAYER_UNIT_TRAIN_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('unitType', GetTrainedUnitType))))
+    eventGenerators[EVENT_PLAYER_UNIT_TRAIN_START]('unitStartTrain', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_TRAIN_CANCEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('unitType', GetTrainedUnitType))))
+    eventGenerators[EVENT_PLAYER_UNIT_TRAIN_CANCEL]('unitCancelTrain', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_TRAIN_FINISH, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTrainedUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_TRAIN_FINISH]('unitFinishTrain', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_TRAIN_FINISH]('unitFinishTrained', GetTrainedUnit)
+
+    -- Unit Research
+    EventGenerator('unit', EVENT_PLAYER_UNIT_RESEARCH_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('researched', GetResearched))))
+    eventGenerators[EVENT_PLAYER_UNIT_RESEARCH_START]('unitStartResearch', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_RESEARCH_CANCEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('researched', GetResearched))))
+    eventGenerators[EVENT_PLAYER_UNIT_RESEARCH_CANCEL]('unitCancelResearch', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_RESEARCH_FINISH, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('researched', GetResearched))))
+    eventGenerators[EVENT_PLAYER_UNIT_RESEARCH_FINISH]('unitFinishResearch', GetTriggerUnit)
+
+    -- Unit Levelup
+    EventGenerator('unit', EVENT_PLAYER_HERO_LEVEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_HERO_LEVEL]('unitLevelUp', GetTriggerUnit)
+
+    -- Unit Learn Ability
+    EventGenerator('unit', EVENT_PLAYER_HERO_SKILL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('ability', GetLearnedSkill), Array('abilityLevel', GetLearnedSkillLevel))))
+    eventGenerators[EVENT_PLAYER_HERO_SKILL]('unitLearnAbility', GetTriggerUnit)
+
+    -- Unit Revivable
+    EventGenerator('unit', EVENT_PLAYER_HERO_REVIVABLE, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_HERO_REVIVABLE]('unitRevivable', GetTriggerUnit)
+
+    -- Unit Revive
+    EventGenerator('unit', EVENT_PLAYER_HERO_REVIVE_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_HERO_REVIVE_START]('unitStartRevive', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_HERO_REVIVE_CANCEL, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_HERO_REVIVE_CANCEL]('unitCancelRevive', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_HERO_REVIVE_FINISH, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
+    eventGenerators[EVENT_PLAYER_HERO_REVIVE_FINISH]('unitFinishRevive', GetTriggerUnit)
+
+    -- Unit Summon
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SUMMON, Map(Array(Array('source', GetTriggerUnit), Array('target', GetSummonedUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_SUMMON]('unitSummon', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_SUMMON]('unitSummoned', GetSummonedUnit)
+
+    -- Unit Item
+    EventGenerator('unit', EVENT_PLAYER_UNIT_DROP_ITEM, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('item', GetManipulatedItem))))
+    eventGenerators[EVENT_PLAYER_UNIT_DROP_ITEM]('unitDropItem', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_PICKUP_ITEM, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('item', GetManipulatedItem))))
+    eventGenerators[EVENT_PLAYER_UNIT_PICKUP_ITEM]('unitPickupItem', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_USE_ITEM, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('item', GetManipulatedItem))))
+    eventGenerators[EVENT_PLAYER_UNIT_USE_ITEM]('unitUseItem', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SELL_ITEM, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('item', GetSoldItem))))
+    eventGenerators[EVENT_PLAYER_UNIT_SELL_ITEM]('unitSellItem', GetTriggerUnit)
+
+    -- Unit Load
+    EventGenerator('unit', EVENT_PLAYER_UNIT_LOADED, Map(Array(Array('source', GetTransportUnit), Array('target', GetLoadedUnit))))
+    eventGenerators[EVENT_PLAYER_UNIT_LOADED]('unitLoad', GetTransportUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_LOADED]('unitLoaded', GetLoadedUnit)
+
+    -- Unit Change Owner
+    EventGenerator('unit', EVENT_PLAYER_UNIT_CHANGE_OWNER, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit), Array('newOwner', GetChangingUnitOwner))))
+    eventGenerators[EVENT_PLAYER_UNIT_CHANGE_OWNER]('unitChangeOwner', GetTriggerUnit)
+    eventGenerators[EVENT_PLAYER_UNIT_CHANGE_OWNER]('playerUnitOwnershipRecieved', GetChangingUnitOwner)
+
+    -- Unit Spell
+    local spellArguments = Map(Array(
+        Array('source', GetTriggerUnit),
+        Array('target', GetTriggerUnit),
+        Array('ability', GetSpellAbility),
+        Array('targetX', GetSpellTargetX),
+        Array('targetY', GetSpellTargetY),
+        Array('targetUnit', GetSpellTargetUnit)
+    ))
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SPELL_CHANNEL, spellArguments)
+    eventGenerators[EVENT_PLAYER_UNIT_SPELL_CHANNEL]('unitSpellChannel', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SPELL_CAST, spellArguments)
+    eventGenerators[EVENT_PLAYER_UNIT_SPELL_CAST]('unitSpellCast', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SPELL_EFFECT, spellArguments)
+    eventGenerators[EVENT_PLAYER_UNIT_SPELL_EFFECT]('unitSpellEffect', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SPELL_FINISH, spellArguments)
+    eventGenerators[EVENT_PLAYER_UNIT_SPELL_FINISH]('unitSpellFinish', GetTriggerUnit)
+    EventGenerator('unit', EVENT_PLAYER_UNIT_SPELL_ENDCAST, spellArguments)
+    eventGenerators[EVENT_PLAYER_UNIT_SPELL_ENDCAST]('unitSpellEndCast', GetTriggerUnit)
+
+    Event('unitInit')
+
+    init(function()
+        local trigger = CreateTrigger()
+        local region = CreateRegion()
+        local rect = GetWorldBounds()
+
+        RegionAddRect(region, rect)
+        RemoveRect(rect)
+
+        TriggerRegisterEnterRegion(trigger, region, nil)
+        TriggerAddCondition(trigger, Filter(function()
+            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), destructableAbility) > 0 then
+                destructables:add(GetTriggerUnit())
+                return
+            end
+            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), projectileAbility) > 0 then
+                projectiles:add(GetTriggerUnit())
+                return
+            end
+            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), specialEffectAbility) > 0 then
+                specialEffects:add(GetTriggerUnit())
+                return
+            end
+            units:add(GetTriggerUnit())
+            events.unitInit(Array(GetOwningPlayer(GetTriggerUnit()), GetTriggerUnit()), Map(Array(Array('source', GetTriggerUnit()), Array('target', GetTriggerUnit()))))
+        end))
+
+        for i = 0, bj_MAX_PLAYER_SLOTS - 1 do
+            local group = CreateGroup()
+            GroupEnumUnitsOfPlayer(group, Player(i), Filter(function()
+                if GetUnitAbilityLevelSwapped(GetFilterUnit(), destructableAbility) > 0 then
+                    destructables:add(GetFilterUnit())
+                    return
+                end
+                if GetUnitAbilityLevelSwapped(GetFilterUnit(), projectileAbility) > 0 then
+                    projectiles:add(GetFilterUnit())
+                    return
+                end
+                if GetUnitAbilityLevelSwapped(GetFilterUnit(), specialEffectAbility) > 0 then
+                    specialEffects:add(GetFilterUnit())
+                    return
+                end
+                units:add(GetFilterUnit())
+                events.unitInit(Array(GetOwningPlayer(GetFilterUnit()), GetFilterUnit()), Map(Array(Array('source', GetFilterUnit()), Array('target', GetFilterUnit()))))
+            end))
+            DestroyGroup(group)
+        end
+    end)
+end
+
+-- Internal Valiadors
+do
+    -- Hero
+    Valiador('sourceIsHero', function(arguments)
+        return IsUnitType(arguments.source, UNIT_TYPE_HERO)
+    end)
+    Valiador('targetIsHero', function(arguments)
+        return IsUnitType(arguments.target, UNIT_TYPE_HERO)
+    end)
+    Valiador('sourceIsNonHero', function(arguments)
+        return not IsUnitType(arguments.source, UNIT_TYPE_HERO)
+    end)
+    Valiador('targetIsNonHero', function(arguments)
+        return not IsUnitType(arguments.target, UNIT_TYPE_HERO)
+    end)
+end
+
+-- Unit Management
+do
+    local old = RemoveUnit
+
+    function RemoveUnit(unit)
+        HideUnit(unit, true)
+        units:remove(unit)
+        local timer = Timer()
+        timer:start(1.0, false, Map(Array(Array('source', unit), Array('target', unit))) ,function(parameters, this)
+            gameStorage[parameters.target] = nil
+            old(parameters.target)
+            this:finish()
+        end)
+    end
+
+    Effect('unitManageRemove', function(arguments)
+        local timer1 = Timer()
+        timer1:start(88.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+            units:remove(parameters.target)
+            this:finish()
+        end)
+        local timer2 = Timer()
+        timer2:start(89.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+            gameStorage[parameters.target] = nil
+            old(parameters.target)
+            this:finish()
+        end)
+    end)
+
+    effects.unitManageRemove:addValiador(valiadors.targetIsNonHero)
+
+    events.unitKilled:register('global', effects.unitManageRemove, 1)
 end
