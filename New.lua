@@ -226,7 +226,7 @@ do
     end
 
     function Set:entries()
-        return Array(table.unpack(self._values, 1, self.length))
+        return Array(table.unpack(self._values, 1, self.size))
     end
 
     Set.values = Set.entries
@@ -240,7 +240,7 @@ do
     end
 
     function Set:unpack()
-        return table.unpack(self._values, 1, self.length)
+        return table.unpack(self._values, 1, self.size)
     end
 end
 
@@ -1066,10 +1066,6 @@ do
     end
 end
 
--- Above have been tested to perform nicely.
--- WARNING!
--- Below are not yet tested. Further testing is still required.
-
 -- Internal Events
 do
     -- Unit Attack
@@ -1079,12 +1075,8 @@ do
 
     -- Unit Killed
     EventGenerator('unit', EVENT_PLAYER_UNIT_DEATH, Map(Array(Array('source', GetKillingUnit), Array('target', GetTriggerUnit))))
-    eventGenerators[EVENT_PLAYER_UNIT_DEATH]('unitKill', GetAttacker)
+    eventGenerators[EVENT_PLAYER_UNIT_DEATH]('unitKill', GetKillingUnit)
     eventGenerators[EVENT_PLAYER_UNIT_DEATH]('unitKilled', GetTriggerUnit)
-
-    -- Unit Decay
-    EventGenerator('unit', EVENT_PLAYER_UNIT_DECAY, Map(Array(Array('source', GetTriggerUnit), Array('target', GetTriggerUnit))))
-    eventGenerators[EVENT_PLAYER_UNIT_DECAY]('unitDecay', GetTriggerUnit)
 
     -- Unit Construct
     EventGenerator('unit', EVENT_PLAYER_UNIT_CONSTRUCT_START, Map(Array(Array('source', GetTriggerUnit), Array('target', GetConstructingStructure))))
@@ -1199,15 +1191,15 @@ do
 
         TriggerRegisterEnterRegion(trigger, region, nil)
         TriggerAddCondition(trigger, Filter(function()
-            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), destructableAbility) > 0 then
+            if GetUnitAbilityLevel(GetTriggerUnit(), destructableAbility) > 0 then
                 destructables:add(GetTriggerUnit())
                 return
             end
-            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), projectileAbility) > 0 then
+            if GetUnitAbilityLevel(GetTriggerUnit(), projectileAbility) > 0 then
                 projectiles:add(GetTriggerUnit())
                 return
             end
-            if GetUnitAbilityLevelSwapped(GetTriggerUnit(), specialEffectAbility) > 0 then
+            if GetUnitAbilityLevel(GetTriggerUnit(), specialEffectAbility) > 0 then
                 specialEffects:add(GetTriggerUnit())
                 return
             end
@@ -1218,15 +1210,15 @@ do
         for i = 0, bj_MAX_PLAYER_SLOTS - 1 do
             local group = CreateGroup()
             GroupEnumUnitsOfPlayer(group, Player(i), Filter(function()
-                if GetUnitAbilityLevelSwapped(GetFilterUnit(), destructableAbility) > 0 then
+                if GetUnitAbilityLevel(GetFilterUnit(), destructableAbility) > 0 then
                     destructables:add(GetFilterUnit())
                     return
                 end
-                if GetUnitAbilityLevelSwapped(GetFilterUnit(), projectileAbility) > 0 then
+                if GetUnitAbilityLevel(GetFilterUnit(), projectileAbility) > 0 then
                     projectiles:add(GetFilterUnit())
                     return
                 end
-                if GetUnitAbilityLevelSwapped(GetFilterUnit(), specialEffectAbility) > 0 then
+                if GetUnitAbilityLevel(GetFilterUnit(), specialEffectAbility) > 0 then
                     specialEffects:add(GetFilterUnit())
                     return
                 end
@@ -1248,43 +1240,238 @@ do
         return IsUnitType(arguments.target, UNIT_TYPE_HERO)
     end)
     Valiador('sourceIsNonHero', function(arguments)
-        return not IsUnitType(arguments.source, UNIT_TYPE_HERO)
+        return IsUnitType(arguments.source, UNIT_TYPE_HERO) == false
     end)
     Valiador('targetIsNonHero', function(arguments)
-        return not IsUnitType(arguments.target, UNIT_TYPE_HERO)
+        return IsUnitType(arguments.target, UNIT_TYPE_HERO) == false
     end)
 end
 
 -- Unit Management
 do
-    local old = RemoveUnit
+    local oldFunc = RemoveUnit
 
     function RemoveUnit(unit)
-        HideUnit(unit, true)
-        units:remove(unit)
+        ShowUnit(unit, false)
+        units:delete(unit)
+        events.unitRemoved(Array(GetOwningPlayer(unit), unit), Map(Array(Array('source', unit), Array('target', unit))))
         local timer = Timer()
         timer:start(1.0, false, Map(Array(Array('source', unit), Array('target', unit))) ,function(parameters, this)
             gameStorage[parameters.target] = nil
-            old(parameters.target)
+            oldFunc(parameters.target)
             this:finish()
         end)
     end
 
-    Effect('unitManageRemove', function(arguments)
-        local timer1 = Timer()
-        timer1:start(88.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
-            units:remove(parameters.target)
-            this:finish()
-        end)
-        local timer2 = Timer()
-        timer2:start(89.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
-            gameStorage[parameters.target] = nil
-            old(parameters.target)
+    Effect('unitDecayEffect', function(arguments)
+        local timer = Timer()
+        timer:start(5.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+            events.unitDecay(Array(GetOwningPlayer(parameters.target), parameters.target), Map(Array(Array('source', parameters.target), Array('target', parameters.target))))
+            RemoveUnit(parameters.target)
             this:finish()
         end)
     end)
 
-    effects.unitManageRemove:addValiador(valiadors.targetIsNonHero)
+    effects.unitDecayEffect:addValiador(valiadors.targetIsNonHero)
 
-    events.unitKilled:register('global', effects.unitManageRemove, 1)
+    events.unitKilled:register('global', effects.unitDecayEffect, 1)
+
+    Event('unitDecay')
+
+    Event('unitRemoved')
+end
+
+-- Damage [NOT YET TESTED]
+do
+    local damageConstants = Array(Array(1.00, 1.00, 1.00, 1.00, 1.00, 0.75, 0.05, 1.00), Array(1.00, 1.50, 1.00, 0.70, 1.00, 1.00, 0.05, 1.00), Array(2.00, 0.75, 1.00, 0.35, 1.00, 0.50, 0.05, 1.50), Array(1.00, 0.50, 1.00, 1.50, 1.00, 0.50, 0.05, 1.50), Array(1.25, 0.75, 2.00, 0.35, 1.00, 0.50, 0.05, 1.00), Array(1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00), Array(1.00, 1.00, 1.00, 0.50, 1.00, 1.00, 0.05, 1.00))
+    local ethernalConstants = Array(0, 0, 0, 1.66, 0, 1.66, 0)
+
+    local attackTypeIndexes = Map(Array(Array(ConvertAttackType(0), 0), Array(ConvertAttackType(1), 1), Array(ConvertAttackType(2), 2), Array(ConvertAttackType(3), 3), Array(ConvertAttackType(4), 4), Array(ConvertAttackType(5), 5), Array(ConvertAttackType(6), 6)))
+
+    local function ConvertDamageCategory(damagetype)
+        if damagetype == DAMAGE_TYPE_NORMAL then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_ENHANCED then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_FIRE then return "DAMAGE_CAT_FIRE" end
+        if damagetype == DAMAGE_TYPE_COLD then return "DAMAGE_CAT_FROST" end
+        if damagetype == DAMAGE_TYPE_LIGHTNING then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_POISON then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_DISEASE then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_DIVINE then return "DAMAGE_CAT_DIVINE" end
+        if damagetype == DAMAGE_TYPE_MAGIC then return "DAMAGE_CAT_ARCANE" end
+        if damagetype == DAMAGE_TYPE_SONIC then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_ACID then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_FORCE then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_DEATH then return 'DAMAGE_CAT_SHADOW' end
+        if damagetype == DAMAGE_TYPE_MIND then return 'DAMAGE_CAT_SHADOW' end
+        if damagetype == DAMAGE_TYPE_PLANT then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_DEFENSIVE then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_DEMOLITION then return "DAMAGE_CAT_PHYSICAL" end
+        if damagetype == DAMAGE_TYPE_SLOW_POISON then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_SPIRIT_LINK then return "DAMAGE_CAT_UNIVERSAL" end
+        if damagetype == DAMAGE_TYPE_SHADOW_STRIKE then return "DAMAGE_CAT_NATURAL" end
+        if damagetype == DAMAGE_TYPE_UNIVERSAL then return "DAMAGE_CAT_UNIVERSAL" end
+        return "DAMAGE_CAT_UNIVERSAL"
+    end
+
+    function attackType2Integer(attackType)
+        return attackTypeIndexes[attackType]
+    end
+
+    Event('unitDamagingStart')
+    Event('unitDamagedStart')
+
+    Event('unitDamagingModifier')
+    Event('unitDamagedModifier')
+
+    Event('unitDamagingFactor')
+    Event('unitDamagedFactor')
+
+    Event('unitDamagingLimit')
+    Event('unitDamagedLimit')
+
+    Event('unitDamagingFinal')
+    Event('unitDamagedFinal')
+
+    Event('unitDamagingAfter')
+    Event('unitDamagedAfter')
+
+    function damageUnit(source, target, value, attackType, damageType, flags)
+        local parameters = Map(Array(
+            Array('source', source),
+            Array('target', target),
+            Array('value', value),
+            Array('attackType', attackType),
+            Array('damageType', damageType),
+            Array('flags', flags)
+        ))
+
+        events.unitDamagingStart(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedStart(Array(GetOwningPlayer(target), target), parameters)
+
+        if parameters.flags:has('DAMAGE_FLAG_ATTACK') and not parameters.ignoreArmor then
+            if BlzGetUnitArmor(parameters.target) > 0 then
+                parameters.value = parameters.value * (1.00 - ((BlzGetUnitArmor(parameters.target) * 0.06) / (BlzGetUnitArmor(parameters.target) * 0.06 + 1 )))
+            elseif BlzGetUnitArmor(parameters.target) < 0 then
+                parameters.value = parameters.value * (2- ( 0.94 ^ (-1 * BlzGetUnitArmor(parameters.target))))
+            end
+        end
+        if not parameters.ignoreDefenseType then
+            parameters.value = parameters.value * damageConstants[AttackTypeToInteger(parameters.attackType)][BlzGetUnitIntegerField(parameters.target, UNIT_IF_DEFENSE_TYPE)]
+        end
+        if IsUnitType(parameters.target, UNIT_TYPE_ETHEREAL) then
+            parameters.value = parameters.value * ethernalConstants[AttackTypeToInteger(parameters.attackType)]
+        end
+
+        if parameters.value <= 0.00 then return end
+
+        events.unitDamagingModifier(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedModifier(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitDamagingFactor(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedFactor(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitDamagingLimit(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedLimit(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitDamagingFinal(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedFinal(Array(GetOwningPlayer(target), target), parameters)
+
+        if parameters.value <= 0.00 then return end
+
+        UnitDamageTarget(parameters.source, parameters.target, parameters.value, false, false, ATTACK_TYPE_CHAOS, DAMAGE_TYPE_UNKNOWN, WEAPON_TYPE_WHOKNOWS)
+
+        events.unitDamagingAfter(Array(GetOwningPlayer(source), source), parameters)
+        events.unitDamagedAfter(Array(GetOwningPlayer(target), target), parameters)
+    end
+
+    init(function()
+        local trigger = CreateTrigger()
+
+        TriggerRegisterAnyUnitEventBJ(trigger, EVENT_PLAYER_UNIT_DAMAGED)
+
+        TriggerAddCondition(trigger, Filter(function()
+            if GetEventDamage() == 0.00 or BlzGetEventDamageType() == DAMAGE_TYPE_UNKNOWN then
+                return
+            end
+
+            if GetEventDamage() <= 0.001 then
+                BlzSetEventDamage(0.00)
+                return
+            end
+
+            local flags = Set()
+            if BlzGetEventAttackType() == ATTACK_TYPE_NORMAL then
+                flags:add("DAMAGE_FLAG_SPELL")
+            else
+                flags:add("DAMAGE_FLAG_ATTACK")
+            end
+
+            flags:add(ConvertDamageCategory(BlzGetEventDamageType()))
+
+            damageUnit(GetEventDamageSource(), GetTriggerUnit(), GetEventDamage(), BlzGetEventAttackType(), BlzGetEventDamageType(), flags)
+
+            BlzSetEventDamage(0.00)
+        end))
+    end)
+end
+
+-- Restore [NOT YET TESTED]
+do
+    Event('unitRestoringStart')
+    Event('unitRestoredStart')
+
+    Event('unitRestoringModifier')
+    Event('unitRestoredModifier')
+
+    Event('unitRestoringFactor')
+    Event('unitRestoredFactor')
+
+    Event('unitRestoringLimit')
+    Event('unitRestoredLimit')
+
+    Event('unitRestoringFinal')
+    Event('unitRestoredFinal')
+
+    Event('unitRestoringAfter')
+    Event('unitRestoredAfter')
+
+    function restoreUnit(source, target, value, type, flags)
+        local parameters = Map(Array(
+            Array('source', source),
+            Array('target', target),
+            Array('value', value),
+            Array('restoreType', type),
+            Array('flags', flags)
+        ))
+
+        events.unitRestoringStart(Array(GetOwningPlayer(source), source), parameters)
+        events.unitRestoredStart(Array(GetOwningPlayer(target), target), parameters)
+
+        if parameters.value <= 0 then return end
+
+        events.unitRestoringModifier(Array(GetOwningPlayer(source), source), parameters)
+        events.unitRestoredModifier(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitRestoringFactor(Array(GetOwningPlayer(source), source), parameters)
+        events.unitRestoredFactor(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitRestoringLimit(Array(GetOwningPlayer(source), source), parameters)
+        events.unitRestoredLimit(Array(GetOwningPlayer(target), target), parameters)
+
+        events.unitRestoringFinal(Array(GetOwningPlayer(source), source), parameters)
+        events.unitRestoredFinal(Array(GetOwningPlayer(target), target), parameters)
+
+        if parameters.value <= 0 then return end
+
+        if parameters.restoreType == 'health' then
+            SetUnitLifeBJ(parameters.target, GetUnitState(parameters.target, UNIT_STATE_LIFE) + parameters.value)
+        elseif parameters.restoreType == 'mana' then
+            SetUnitManaBJ(parameters.target, GetUnitState(parameters.target, UNIT_STATE_MANA) + parameters.value)
+        end
+    end
+end
+
+-- Ability [NOT COMPLETED]
+do
+    
 end
