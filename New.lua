@@ -1,6 +1,7 @@
 -- Debug
 do
     debugCount = 0
+    displayValue = true
 end
 
 -- Basic Data Methods
@@ -440,6 +441,17 @@ do
         return self
     end
 
+    function Timer:pause()
+        activeTimers:delete(self)
+        return self
+    end
+
+    function Timer:resume()
+        if not self.status then return end
+        activeTimers:add(self)
+        return self
+    end
+
     function Timer:setFlag(flag)
         self.status.flags:add(flag)
         return self
@@ -465,7 +477,6 @@ do
     end
 
     function Timer:tick()
-        if self.status.flags:has('paused') then return end
         self.status.durationLeft = self.status.durationLeft - TICK * self.status.speed
         if self.status.durationLeft <= 0 then
             self.status.func(self.status.parameters, self)
@@ -719,7 +730,7 @@ do
         getStorage(true, Set(), newBehavior.source, 'behaviors'):add(newBehavior)
         getStorage(true, Set(), newBehavior.target, 'behaviods'):add(newBehavior)
         if newBehavior.linkedBuff ~= nil then
-            print(score(newBehavior.target, 'buffs', newBehavior.linkedBuff, 1))
+            score(newBehavior.target, 'buffs', newBehavior.linkedBuff, 1)
             if getScore(newBehavior.target, 'buffs', newBehavior.linkedBuff) > 0 then
                 Dummy(newBehavior.target, newBehavior.linkedBuffAbility, newBehavior.linkedBuffOrder, 1)
             end
@@ -770,7 +781,7 @@ do
         getStorage(true, Set(), self.target, 'behaviods'):delete(self)
         behaviors:delete(self)
         if self.linkedBuff ~= nil then
-            print(score(self.target, 'buffs', self.linkedBuff, -1))
+            score(self.target, 'buffs', self.linkedBuff, -1)
             if getScore(self.target, 'buffs', self.linkedBuff) <= 0 then
                 UnitRemoveBuffBJ(self.linkedBuff, self.target)
             end
@@ -867,6 +878,109 @@ do
     specialEffects = Set()
 end
 
+-- Arching Floating Text
+do
+    local DEFINITION      = 0.02500000
+    local SIZE_MIN        = 0.016         -- Minimum size of text
+    local SIZE_BONUS      = 0.008         -- Text size increase
+    local TIME_LIFE       = 0.6           -- How long the text lasts
+    local TIME_FADE       = 0.4           -- When does the text start to fade
+    local Z_OFFSET        = 50            -- Height above unit
+    local Z_OFFSET_BON    = 50            -- How much extra height the text gains
+    local VELOCITY        = 2.0           -- How fast the text move in x/y plane
+    local TMR             = Timer()
+
+    local ANGLE_RND       = true          -- Is the angle random or fixed
+    local ANGLE           = bj_PI / 2.0     -- If fixed, specify the Movement angle of the text.
+
+    local tt   = {}
+    local as   = {} -- angle, sin component
+    local ac   = {} -- angle, cos component
+    local ah   = {} -- arc height
+    local t    = {} -- time
+    local x    = {} -- origin x
+    local y    = {} -- origin y
+    local str  = {} -- text
+
+    local ic   = 0  -- Instance count
+    local rn   = {}
+    rn[0] = 0
+    local next = {}
+    next[0] = 0
+    local prev = {}
+    prev[0] = 0 --Needed due to Lua not initializing them.
+
+    function ArcingTextTag(s, u)
+        local this = rn[0]
+        if this == 0 then
+            ic = ic + 1
+            this = ic
+        else
+            rn[0] = rn[this]
+        end
+
+        next[this] = 0
+        prev[this] = prev[0]
+        next[prev[0]] = this
+        prev[0] = this
+
+        str[this] = s
+        x[this] = GetUnitX(u)
+        y[this] = GetUnitY(u)
+        t[this] = TIME_LIFE
+
+        local a
+        if ANGLE_RND then
+            a = GetRandomReal(0, 2*bj_PI)
+        else
+            a = ANGLE
+        end
+        as[this] = Sin(a)*VELOCITY
+        ac[this] = Cos(a)*VELOCITY
+        ah[this] = 0.
+
+        if IsUnitVisible(u, GetLocalPlayer()) then
+            tt[this] = CreateTextTag()
+            SetTextTagPermanent(tt[this], false)
+            SetTextTagLifespan(tt[this], TIME_LIFE)
+            SetTextTagFadepoint(tt[this], TIME_FADE)
+            SetTextTagText(tt[this], s, SIZE_MIN)
+            SetTextTagPos(tt[this], x[this], y[this], Z_OFFSET)
+        end
+
+        if prev[this] == 0 then
+            if TMR.status then
+                TMR:resume()
+            else
+                TMR:start(0, true, Map(), function()
+                    local this = next[0]
+                    local p
+                    while (this ~= 0) do
+                        p = Sin(bj_PI*t[this])
+                        t[this] = t[this] - DEFINITION
+                        x[this] = x[this] + ac[this]
+                        y[this] = y[this] + as[this]
+                        SetTextTagPos(tt[this], x[this], y[this], Z_OFFSET + Z_OFFSET_BON * p)
+                        SetTextTagText(tt[this], str[this], SIZE_MIN + SIZE_BONUS * p)
+                        if t[this] <= 0.0 then
+                            tt[this] = nil
+                            next[prev[this]] = next[this]
+                            prev[next[this]] = prev[this]
+                            rn[this] = rn[0]
+                            rn[0] = this
+                            if next[0] == 0 then
+                                TMR:pause()
+                            end
+                        end
+                        this = next[this]
+                    end
+                end)
+            end
+        end
+        return this
+    end
+end
+
 -- Map Bounds
 do
     MapBounds = setmetatable({}, {})
@@ -952,16 +1066,12 @@ do
     end })
 
     function Dummy:recycle(unit)
-        if GetUnitTypeId(unit) ~= DUMMY then
-            print("[DummyPool] Error: Trying to recycle a non dummy unit")
-        else
-            dummies:add(unit)
-            SetUnitX(unit, WorldBounds.maxX)
-            SetUnitY(unit, WorldBounds.maxY)
-            SetUnitOwner(unit, player, false)
-            ShowUnit(unit, false)
-            BlzPauseUnitEx(unit, true)
-        end
+        dummies:add(unit)
+        SetUnitX(unit, WorldBounds.maxX)
+        SetUnitY(unit, WorldBounds.maxY)
+        SetUnitOwner(unit, player, false)
+        ShowUnit(unit, false)
+        BlzPauseUnitEx(unit, true)
     end
 
     function Dummy:retrieve(owner, x, y, z, face)
@@ -986,19 +1096,15 @@ do
 
     function Dummy:timed(unit, delay)
         local timer = Timer()
-        if GetUnitTypeId(unit) ~= DUMMY then
-            print("[DummyPool] Error: Trying to recycle a non dummy unit")
-        else
-            timer:start(delay, false, Map(Array('unit', unit)), function(parameters, this)
-                dummies:add(parameters.unit)
-                SetUnitX(parameters.unit, WorldBounds.maxX)
-                SetUnitY(parameters.unit, WorldBounds.maxY)
-                SetUnitOwner(parameters.unit, player, false)
-                ShowUnit(parameters.unit, false)
-                BlzPauseUnitEx(parameters.unit, true)
-                this:finish()
-            end)
-        end
+        timer:start(delay, false, Map(Array('unit', unit)), function(parameters, this)
+            dummies:add(parameters.unit)
+            SetUnitX(parameters.unit, WorldBounds.maxX)
+            SetUnitY(parameters.unit, WorldBounds.maxY)
+            SetUnitOwner(parameters.unit, player, false)
+            ShowUnit(parameters.unit, false)
+            BlzPauseUnitEx(parameters.unit, true)
+            this:finish()
+        end)
     end
 end
 
@@ -1265,7 +1371,23 @@ do
 
     Effect('unitDecayEffect', function(arguments)
         local timer = Timer()
-        timer:start(5.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+        if IsUnitType(arguments.target, UNIT_TYPE_SUMMONED) then
+            timer:start(3.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+                events.unitDecay(Array(GetOwningPlayer(parameters.target), parameters.target), Map(Array(Array('source', parameters.target), Array('target', parameters.target))))
+                RemoveUnit(parameters.target)
+                this:finish()
+            end)
+            return
+        end
+        if IsUnitType(arguments.target, UNIT_TYPE_STRUCTURE) then
+            timer:start(28.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
+                events.unitDecay(Array(GetOwningPlayer(parameters.target), parameters.target), Map(Array(Array('source', parameters.target), Array('target', parameters.target))))
+                RemoveUnit(parameters.target)
+                this:finish()
+            end)
+            return
+        end
+        timer:start(88.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
             events.unitDecay(Array(GetOwningPlayer(parameters.target), parameters.target), Map(Array(Array('source', parameters.target), Array('target', parameters.target))))
             RemoveUnit(parameters.target)
             this:finish()
@@ -1356,10 +1478,10 @@ do
             end
         end
         if not parameters.ignoreDefenseType then
-            parameters.value = parameters.value * damageConstants[AttackTypeToInteger(parameters.attackType)][BlzGetUnitIntegerField(parameters.target, UNIT_IF_DEFENSE_TYPE)]
+            parameters.value = parameters.value * damageConstants[attackType2Integer(parameters.attackType)][BlzGetUnitIntegerField(parameters.target, UNIT_IF_DEFENSE_TYPE)]
         end
         if IsUnitType(parameters.target, UNIT_TYPE_ETHEREAL) then
-            parameters.value = parameters.value * ethernalConstants[AttackTypeToInteger(parameters.attackType)]
+            parameters.value = parameters.value * ethernalConstants[attackType2Integer(parameters.attackType)]
         end
 
         if parameters.value <= 0.00 then return end
@@ -1377,6 +1499,16 @@ do
         events.unitDamagedFinal(Array(GetOwningPlayer(target), target), parameters)
 
         if parameters.value <= 0.00 then return end
+
+        if not displayValue then goto skip end
+
+        if parameters.flags:has('DAMAGE_FLAG_ATTACK') then
+            ArcingTextTag("|cffff0000" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+        else
+            ArcingTextTag("|cffff00ff" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+        end
+
+        ::skip::
 
         UnitDamageTarget(parameters.source, parameters.target, parameters.value, false, false, ATTACK_TYPE_CHAOS, DAMAGE_TYPE_UNKNOWN, WEAPON_TYPE_WHOKNOWS)
 
@@ -1462,6 +1594,12 @@ do
         events.unitRestoredFinal(Array(GetOwningPlayer(target), target), parameters)
 
         if parameters.value <= 0 then return end
+
+        if not displayValue then goto skip end
+
+        ArcingTextTag("|cff00ff00" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+
+        ::skip::
 
         if parameters.restoreType == 'health' then
             SetUnitLifeBJ(parameters.target, GetUnitState(parameters.target, UNIT_STATE_LIFE) + parameters.value)
