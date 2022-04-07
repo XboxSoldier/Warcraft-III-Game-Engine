@@ -878,107 +878,70 @@ do
     specialEffects = Set()
 end
 
--- Arching Floating Text
+-- Arcing Floating Text
 do
-    local DEFINITION      = 0.02500000
     local SIZE_MIN        = 0.016         -- Minimum size of text
     local SIZE_BONUS      = 0.008         -- Text size increase
-    local TIME_LIFE       = 0.6           -- How long the text lasts
-    local TIME_FADE       = 0.4           -- When does the text start to fade
+    local TIME_LIFE       = 0.75           -- How long the text lasts
+    local TIME_FADE       = 0.5           -- When does the text start to fade
     local Z_OFFSET        = 50            -- Height above unit
     local Z_OFFSET_BON    = 50            -- How much extra height the text gains
     local VELOCITY        = 2.0           -- How fast the text move in x/y plane
     local TMR             = Timer()
 
-    local ANGLE_RND       = true          -- Is the angle random or fixed
-    local ANGLE           = bj_PI / 2.0     -- If fixed, specify the Movement angle of the text.
+    ArcingTextTag = { type ='arcingTextTag' }
+    arcingTextTags = Set()
 
-    local tt   = {}
-    local as   = {} -- angle, sin component
-    local ac   = {} -- angle, cos component
-    local ah   = {} -- arc height
-    local t    = {} -- time
-    local x    = {} -- origin x
-    local y    = {} -- origin y
-    local str  = {} -- text
-
-    local ic   = 0  -- Instance count
-    local rn   = {}
-    rn[0] = 0
-    local next = {}
-    next[0] = 0
-    local prev = {}
-    prev[0] = 0 --Needed due to Lua not initializing them.
-
-    function ArcingTextTag(s, u)
-        local this = rn[0]
-        if this == 0 then
-            ic = ic + 1
-            this = ic
-        else
-            rn[0] = rn[this]
+    arcingTextTagMT = { __call = function(this, string, unit)
+        local newArcingTextTag = {}
+        newArcingTextTag.duration = TIME_LIFE
+        newArcingTextTag.x = GetUnitX(unit)
+        newArcingTextTag.y = GetUnitY(unit)
+        newArcingTextTag.string = string
+        local a = GetRandomReal(0, 2*bj_PI)
+        newArcingTextTag.sin = Sin(a)*VELOCITY
+        newArcingTextTag.cos = Cos(a)*VELOCITY
+        newArcingTextTag.height = 0.
+        if IsUnitVisible(unit, GetLocalPlayer()) then
+            newArcingTextTag.tag = CreateTextTag()
+            SetTextTagText(newArcingTextTag.tag, string, SIZE_MIN)
+            SetTextTagPermanent(newArcingTextTag.tag, false)
+            SetTextTagLifespan(newArcingTextTag.tag, TIME_LIFE)
+            SetTextTagFadepoint(newArcingTextTag.tag, TIME_FADE)
+            SetTextTagPos(newArcingTextTag.tag, newArcingTextTag.x newArcingTextTag.y, Z_OFFSET)
         end
-
-        next[this] = 0
-        prev[this] = prev[0]
-        next[prev[0]] = this
-        prev[0] = this
-
-        str[this] = s
-        x[this] = GetUnitX(u)
-        y[this] = GetUnitY(u)
-        t[this] = TIME_LIFE
-
-        local a
-        if ANGLE_RND then
-            a = GetRandomReal(0, 2*bj_PI)
-        else
-            a = ANGLE
-        end
-        as[this] = Sin(a)*VELOCITY
-        ac[this] = Cos(a)*VELOCITY
-        ah[this] = 0.
-
-        if IsUnitVisible(u, GetLocalPlayer()) then
-            tt[this] = CreateTextTag()
-            SetTextTagPermanent(tt[this], false)
-            SetTextTagLifespan(tt[this], TIME_LIFE)
-            SetTextTagFadepoint(tt[this], TIME_FADE)
-            SetTextTagText(tt[this], s, SIZE_MIN)
-            SetTextTagPos(tt[this], x[this], y[this], Z_OFFSET)
-        end
-
-        if prev[this] == 0 then
+        setmetatable(newArcingTextTag, ArcingTextTag)
+        arcingTextTags:add(newArcingTextTag)
+        if arcingTextTags.size == 1 then
             if TMR.status then
                 TMR:resume()
             else
                 TMR:start(0, true, Map(), function()
-                    local this = next[0]
-                    local p
-                    while (this ~= 0) do
-                        p = Sin(bj_PI*t[this])
-                        t[this] = t[this] - DEFINITION
-                        x[this] = x[this] + ac[this]
-                        y[this] = y[this] + as[this]
-                        SetTextTagPos(tt[this], x[this], y[this], Z_OFFSET + Z_OFFSET_BON * p)
-                        SetTextTagText(tt[this], str[this], SIZE_MIN + SIZE_BONUS * p)
-                        if t[this] <= 0.0 then
-                            tt[this] = nil
-                            next[prev[this]] = next[this]
-                            prev[next[this]] = prev[this]
-                            rn[this] = rn[0]
-                            rn[0] = this
-                            if next[0] == 0 then
-                                TMR:pause()
-                            end
+                    local tags = arcingTextTags:values()
+                    for _, v in through(tags) do
+                        local p = Sin(bj_PI * v.duration)
+                        v.duration = v.duration - TICK
+                        v.x = v.x + v.cos
+                        v.y = v.y + v.sin
+                        if v.tag then
+                            SetTextTagPos(v.tag, v.x, v.y, Z_OFFSET + Z_OFFSET_BON * p)
+                            SetTextTagText(v.tag, v.string, SIZE_MIN + SIZE_BONUS * p)
                         end
-                        this = next[this]
+                        if v.duration <= 0.0 then
+                            if v.tag then DestroyTextTagBJ(v.tag) end
+                            arcingTextTags:delete(v)
+                        end
+                    end
+                    if arcingTextTags.size == 0 then
+                        TMR:pause()
                     end
                 end)
             end
         end
-        return this
-    end
+        return newArcingTextTag
+    end }
+
+    setmetatable(ArcingTextTag, arcingTextTagMT)
 end
 
 -- Map Bounds
