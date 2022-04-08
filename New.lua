@@ -413,7 +413,7 @@ end
 do
     Timer = { type = 'timer' }
 
-    TICK = 0.02500000
+    TICK = 0.03125
 
     local timerMT = { __call = function(this)
         local newTimer = {}
@@ -892,9 +892,10 @@ do
     ArcingTextTag = { type ='arcingTextTag' }
     arcingTextTags = Set()
 
-    arcingTextTagMT = { __call = function(this, string, unit)
+    arcingTextTagMT = { __call = function(this, string, unit, minSize, sizeBonus, duration, fadePoint)
         local newArcingTextTag = {}
-        newArcingTextTag.duration = TIME_LIFE
+        newArcingTextTag.duration = duration or TIME_LIFE
+        newArcingTextTag.fadePoint = fadePoint or TIME_FADE
         newArcingTextTag.x = GetUnitX(unit)
         newArcingTextTag.y = GetUnitY(unit)
         newArcingTextTag.string = string
@@ -902,12 +903,14 @@ do
         newArcingTextTag.sin = Sin(a)*VELOCITY
         newArcingTextTag.cos = Cos(a)*VELOCITY
         newArcingTextTag.height = 0.
+        newArcingTextTag.minSize = minSize or SIZE_MIN
+        newArcingTextTag.sizeBonus = sizeBonus or SIZE_BONUS
         if IsUnitVisible(unit, GetLocalPlayer()) then
             newArcingTextTag.tag = CreateTextTag()
-            SetTextTagText(newArcingTextTag.tag, string, SIZE_MIN)
-            SetTextTagPermanent(newArcingTextTag.tag, false)
-            SetTextTagLifespan(newArcingTextTag.tag, TIME_LIFE)
-            SetTextTagFadepoint(newArcingTextTag.tag, TIME_FADE)
+            SetTextTagText(newArcingTextTag.tag, string, newArcingTextTag.minSize)
+            SetTextTagPermanent(newArcingTextTag.tag, true)
+            SetTextTagLifespan(newArcingTextTag.tag, newArcingTextTag.duration)
+            SetTextTagFadepoint(newArcingTextTag.tag, newArcingTextTag.fadePoint)
             SetTextTagPos(newArcingTextTag.tag, newArcingTextTag.x newArcingTextTag.y, Z_OFFSET)
         end
         setmetatable(newArcingTextTag, ArcingTextTag)
@@ -925,7 +928,7 @@ do
                         v.y = v.y + v.sin
                         if v.tag then
                             SetTextTagPos(v.tag, v.x, v.y, Z_OFFSET + Z_OFFSET_BON * p)
-                            SetTextTagText(v.tag, v.string, SIZE_MIN + SIZE_BONUS * p)
+                            SetTextTagText(v.tag, v.string, v.minSize + v.sizeBonus * p)
                         end
                         if v.duration <= 0.0 then
                             if v.tag then DestroyTextTagBJ(v.tag) end
