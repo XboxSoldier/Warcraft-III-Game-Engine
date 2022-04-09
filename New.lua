@@ -911,7 +911,7 @@ do
             SetTextTagPermanent(newArcingTextTag.tag, true)
             SetTextTagLifespan(newArcingTextTag.tag, newArcingTextTag.duration)
             SetTextTagFadepoint(newArcingTextTag.tag, newArcingTextTag.fadePoint)
-            SetTextTagPos(newArcingTextTag.tag, newArcingTextTag.x newArcingTextTag.y, Z_OFFSET)
+            SetTextTagPos(newArcingTextTag.tag, newArcingTextTag.x, newArcingTextTag.y, Z_OFFSET)
         end
         setmetatable(newArcingTextTag, ArcingTextTag)
         arcingTextTags:add(newArcingTextTag)
@@ -1369,7 +1369,7 @@ do
     Event('unitRemoved')
 end
 
--- Damage [NOT YET TESTED]
+-- Damage
 do
     local damageConstants = Array(Array(1.00, 1.00, 1.00, 1.00, 1.00, 0.75, 0.05, 1.00), Array(1.00, 1.50, 1.00, 0.70, 1.00, 1.00, 0.05, 1.00), Array(2.00, 0.75, 1.00, 0.35, 1.00, 0.50, 0.05, 1.50), Array(1.00, 0.50, 1.00, 1.50, 1.00, 0.50, 0.05, 1.50), Array(1.25, 0.75, 2.00, 0.35, 1.00, 0.50, 0.05, 1.00), Array(1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00), Array(1.00, 1.00, 1.00, 0.50, 1.00, 1.00, 0.05, 1.00))
     local ethernalConstants = Array(0, 0, 0, 1.66, 0, 1.66, 0)
@@ -1400,6 +1400,9 @@ do
         if damagetype == DAMAGE_TYPE_UNIVERSAL then return "DAMAGE_CAT_UNIVERSAL" end
         return "DAMAGE_CAT_UNIVERSAL"
     end
+
+    local damageDisplayBaseAmount = 100.0
+    local damageDisplayBaseSize = 0.020
 
     function attackType2Integer(attackType)
         return attackTypeIndexes[attackType]
@@ -1436,6 +1439,8 @@ do
         events.unitDamagingStart(Array(GetOwningPlayer(source), source), parameters)
         events.unitDamagedStart(Array(GetOwningPlayer(target), target), parameters)
 
+        if parameters.value <= 0.00 then return end
+
         if parameters.flags:has('DAMAGE_FLAG_ATTACK') and not parameters.ignoreArmor then
             if BlzGetUnitArmor(parameters.target) > 0 then
                 parameters.value = parameters.value * (1.00 - ((BlzGetUnitArmor(parameters.target) * 0.06) / (BlzGetUnitArmor(parameters.target) * 0.06 + 1 )))
@@ -1466,12 +1471,21 @@ do
 
         if parameters.value <= 0.00 then return end
 
+        local damageSize = damageDisplayBaseSize
+        local damageFac = parameters.value / damageDisplayBaseAmount
+
         if not displayValue then goto skip end
 
+        if damageFac < 1 then
+            damageSize = damageSize * (1.25 ^ damageFac - 0.25)
+        elseif damageFac > 1 then
+            damageSize = damageSize * (1.5 - 0.5 / damageFac)
+        end
+
         if parameters.flags:has('DAMAGE_FLAG_ATTACK') then
-            ArcingTextTag("|cffff0000" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+            ArcingTextTag("|cffff0000" .. I2S(R2I(parameters.value)) .. "|r", parameters.target, damageSize, damageSize * 0.50)
         else
-            ArcingTextTag("|cffff00ff" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+            ArcingTextTag("|cffff00ff" .. I2S(R2I(parameters.value)) .. "|r", parameters.target, damageSize, damageSize * 0.50)
         end
 
         ::skip::
@@ -1513,8 +1527,11 @@ do
     end)
 end
 
--- Restore [NOT YET TESTED]
+-- Restore
 do
+    local restoreDisplayBaseAmount = 200.0
+    local restoreDisplayBaseSize = 0.020
+
     Event('unitRestoringStart')
     Event('unitRestoredStart')
 
@@ -1561,9 +1578,22 @@ do
 
         if parameters.value <= 0 then return end
 
-        if not displayValue then goto skip end
+        local restoreSize = restoreDisplayBaseSize
+        local restoreFac = parameters.value / restoreDisplayBaseAmount
 
-        ArcingTextTag("|cff00ff00" .. I2S(R2I(parameters.value)) .. "|r", parameters.target)
+        if not displayValue then goto skip end
+    
+        if restoreFac < 1 then
+            restoreSize = restoreSize * (1.25 ^ restoreFac - 0.25)
+        elseif restoreFac > 1 then
+            restoreSize = restoreSize * (1.5 - 0.5 / restoreFac)
+        end
+
+        if parameters.restoreType == 'health' then
+            ArcingTextTag("|cff00ff00" .. I2S(R2I(parameters.value)) .. "|r", parameters.target, restoreSize, restoreSize * 0.50)
+        elseif parameters.restoreType == 'mana' then
+            ArcingTextTag("|cff00ffff" .. I2S(R2I(parameters.value)) .. "|r", parameters.target, restoreSize, restoreSize * 0.50)
+        end
 
         ::skip::
 
