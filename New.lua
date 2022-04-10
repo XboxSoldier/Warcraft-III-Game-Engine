@@ -510,12 +510,15 @@ do
         delayedFuncs:add(func)
         if delayedFuncs.size == 1 then
             TimerStart(delayTimer, 0, false, function()
-                local array = delayedFuncs:entries()
+                local array
+                ::recycle::
+                array = delayedFuncs:entries()
                 delayedFuncs:clear()
                 for _, v in through(array) do
                     v()
                 end
-                if delayedFuncs.size == 0 then PauseTimer(delayTimer) end
+                if delayedFuncs.size == 0 then goto recycle end
+                PauseTimer(delayTimer)
             end)
         end
     end
