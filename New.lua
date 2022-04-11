@@ -209,13 +209,18 @@ do
 
     function Set:delete(value)
         if self._entries[value] == nil then return end
-        local i = self._entries[value]
-        self.size = self.size - 1
-        table.remove(self._values, i)
-        self._entries[value] = nil
-        for j = i, self.size do
-            self._entries[self._values[j]] = j
+        if self.size == 1 then
+            self._values[1] = 0
+            self._entries[value] = nil
+            self.size = 0
+            return self
         end
+        local i = self._entries[value]
+        self._values[i] = self._values[self.size]
+        self._entries[self._values[i]] = i
+        self._values[self.size] = nil
+        self._entries[value] = nil
+        self.size = self.size - 1
         return self
     end
 
@@ -501,28 +506,27 @@ do
     end)
 end
 
--- Deplay
+-- Delay
 do
     local delayedFuncs = Set()
     local delayTimer = CreateTimer()
+    local function effect()
+        PauseTimer(delayTimer)
+        local array = delayedFuncs:entries()
+        delayedFuncs:clear()
+        for _, v in through(array) do
+            v()
+        end
+        if delayedFuncs.size > 0 then TimerStart(delayTimer, 0, false, effect) end
+        PauseTimer(delayTimer)
+    end
     function delay(func)
         if type(func) ~= 'function' then return end
         delayedFuncs:add(func)
         if delayedFuncs.size == 1 then
-            TimerStart(delayTimer, 0, false, function()
-                local array
-                ::recycle::
-                array = delayedFuncs:entries()
-                delayedFuncs:clear()
-                for _, v in through(array) do
-                    v()
-                end
-                if delayedFuncs.size == 0 then goto recycle end
-                PauseTimer(delayTimer)
-            end)
+            TimerStart(delayTimer, 0, false, effect)
         end
     end
-    Deplay = { type = 'deplay' }
 end
 
 -- Valiador
@@ -1292,7 +1296,9 @@ do
                 specialEffects:add(GetTriggerUnit())
                 return
             end
+            if getScore(GetTriggerUnit(), 'status', 'initialized') ~= 0 then return end
             units:add(GetTriggerUnit())
+            score(GetTriggerUnit(), 'status', 'initialized', 1)
             events.unitInit(Array(GetOwningPlayer(GetTriggerUnit()), GetTriggerUnit()), Map(Array(Array('source', GetTriggerUnit()), Array('target', GetTriggerUnit()))))
         end))
 
@@ -1307,7 +1313,9 @@ do
                     specialEffects:add(GetFilterUnit())
                     return
                 end
+                if getScore(GetFilterUnit(), 'status', 'initialized') ~= 0 then return end
                 units:add(GetFilterUnit())
+                score(GetTriggerUnit(), 'status', 'initialized', 1)
                 events.unitInit(Array(GetOwningPlayer(GetFilterUnit()), GetFilterUnit()), Map(Array(Array('source', GetFilterUnit()), Array('target', GetFilterUnit()))))
             end))
             DestroyGroup(group)
@@ -1334,12 +1342,18 @@ end
 
 -- Unit Management
 do
+    local decayTimers = Map()
     local oldFunc = RemoveUnit
 
     function RemoveUnit(unit)
+        if not units:has(unit) then return end
         ShowUnit(unit, false)
         units:delete(unit)
         events.unitRemoved(Array(GetOwningPlayer(unit), unit), Map(Array(Array('source', unit), Array('target', unit))))
+        if decayTimers:get(unit) ~= nil then
+            decayTimers:get(unit):finish()
+            decayTimers:delete(unit)
+        end
         local timer = Timer()
         timer:start(1.0, false, Map(Array(Array('source', unit), Array('target', unit))) ,function(parameters, this)
             gameStorage[parameters.target] = nil
@@ -1350,6 +1364,7 @@ do
 
     Effect('unitDecayEffect', function(arguments)
         local timer = Timer()
+        decayTimers:set(arguments.target, timer)
         if IsUnitType(arguments.target, UNIT_TYPE_SUMMONED) then
             timer:start(3.0, false, Map(Array(Array('source', arguments.target), Array('target', arguments.target))) ,function(parameters, this)
                 events.unitDecay(Array(GetOwningPlayer(parameters.target), parameters.target), Map(Array(Array('source', parameters.target), Array('target', parameters.target))))
@@ -1901,9 +1916,83 @@ do
     Projectile = { type = 'projectile' }
 
     projectiles = Set()
+    activeProjectiles = Set()
 
-    projectileMT = { __call = function(this)
-    end}
+    function Projectile:move()
+    end
+
+    projectileMT = { __call = function(this, source, x, y, z, ...)
+        local arguments = Array(...)
+        local newProjectile = {}
+        newProjectile.flags = Set()
+        newProjectile.source = source
+        newProjectile.target = nil
+        newProjectile.owner = getOwningPlayer(source)
+        newProjectile.dummy = nil
+
+        newProjectile.open = 0.
+        newProjectile.height = 0.
+        newProjectile.veloc = 0.
+        newProjectile.acceleration = 0.
+        newProjectile.collision = 0.
+        newProjectile.damage = 0.
+        newProjectile.travel = 0.
+        newProjectile.turn = 0.
+        newProjectile.data = 0.
+        newProjectile.type = 0
+        newProjectile.tileset = 0
+        newProjectile.pkey = -1
+        newProjectile.index = -1
+        newProjectile.Model = ""
+        newProjectile.Duration = 0
+        newProjectile.Scale = 1
+        newProjectile.Speed = 0
+        newProjectile.Arc = 0
+        newProjectile.Curve = 0
+        newProjectile.Vision = 0
+        newProjectile.TimeScale = 0.
+        newProjectile.Alpha = 0
+        newProjectile.playercolor = 0
+        newProjectile.Animation = 0
+        newProjectile.onHit = nil
+        newProjectile.onMissile = nil
+        newProjectile.onDestructable = nil
+        newProjectile.onItem = nil
+        newProjectile.onCliff = nil
+        newProjectile.onTerrain = nil
+        newProjectile.onTileset = nil
+        newProjectile.onFinish = nil
+        newProjectile.onBoundaries = nil
+        newProjectile.onPause = nil
+        newProjectile.onResume = nil
+        newProjectile.onRemove = nil
+
+        newProjectile.originalPoint = Coordinate(x, y, z)
+        if arguments.length == 1 then
+            newProjectile.target = arguments[0]
+            newProjectile.targetPoint = Coordinate(GetUnitX(newProjectile.target), GetUnitY(newProjectile.target), GetUnitZ(newProjectile.target))
+        else
+            newProjectile.target = newProjectile.source
+            newProjectile.targetPoint = Coordinate(arguments[0], arguments[1], arguments[2])
+        end
+        newProjectile.effect = ProjectileEffect(x, y, newProjectile.originalPoint.z)
+        Coordinates:link(newProjectile.originalPoint, newProjectile.targetPoint)
+        newProjectile.flags:add('allocated')
+        this.cA = this.originalPoint.angle
+        this.x = x
+        this.y = y
+        this.z = newProjectile.originalPoint.z
+        this.prevX = x
+        this.prevY = y
+        this.prevZ = newProjectile.originalPoint.z
+        this.nextX = x
+        this.nextY = y
+        this.nextZ = newProjectile.originalPoint.z
+        this.toZ = newProjectile.targetPoint.z
+
+        setmetatable(newProjectile, Projectile)
+        projectiles:add(newProjectile)
+    end }
 
     setmetatable(Projectile, projectileMT)
 end
