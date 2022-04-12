@@ -473,14 +473,6 @@ do
         return self
     end
 
-    function Timer:recycle()
-        local array
-        ::recycle::
-        array = garbageBin:entries()
-        garbageBin:clear()
-        if garbageBin.size > 0 then goto recycle end
-    end
-
     function Timer:tick()
         self.status.durationLeft = self.status.durationLeft - TICK * self.status.speed
         if self.status.durationLeft <= 0 then
@@ -497,7 +489,6 @@ do
     init(function()
         local centralTimer = CreateTimer()
         TimerStart(centralTimer, TICK, true, function()
-            Timer:recycle()
             local array = activeTimers:entries()
             for _, v in through(array) do
                 v:tick()
