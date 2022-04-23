@@ -509,7 +509,6 @@ do
             v()
         end
         if delayedFuncs.size > 0 then TimerStart(delayTimer, 0, false, effect) end
-        PauseTimer(delayTimer)
     end
     function delay(func)
         if type(func) ~= 'function' then return end
