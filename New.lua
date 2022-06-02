@@ -2,6 +2,7 @@
 do
     debugCount = 0
     displayValue = true
+    showResult = true
 end
 
 -- Basic Data Methods
@@ -411,6 +412,7 @@ do
         for _,v in through(list) do
             v()
         end
+        if showResult then print('All Init functions successfully executed!') end
     end
 end
 
@@ -524,9 +526,19 @@ do
     Valiador = { type = 'valiador' }
 
     valiadors = Map()
+    local currentId = -1
 
     local valiadorMT = { __call = function(this, name, func)
         local newValiador = {}
+        if type(name) == 'function' then
+            currentId = currentId + 1
+            newValiador.func = name
+            name = '_' .. currentId
+            newValiador.name = name
+            setmetatable(newValiador, Valiador)
+            valiadors[name] = newValiador
+            return newValiador
+        end
         newValiador.name = name
         newValiador.func = func
         setmetatable(newValiador, Valiador)
@@ -548,9 +560,20 @@ do
     Effect = { type = 'effect' }
 
     effects = Map()
+    local currentId = -1
 
     local effectMT = { __call = function(this, name, func)
         local newEffect = {}
+        if type(name) == 'function' then
+            currentId = currentId + 1
+            newEffect.func = name
+            name = '_' .. currentId
+            newEffect.name = name
+            newEffect.valiadors = Set()
+            setmetatable(newEffect, Effect)
+            effects[name] = newEffect
+            return newEffect
+        end
         newEffect.name = name
         newEffect.func = func
         newEffect.valiadors = Set()
@@ -591,6 +614,10 @@ do
 
     function addStoredItem(parent, namespace, key, element)
         getStorage(true, Set(), parent, 'storages', namespace, key):add(element)
+    end
+
+    function deleteStoredItem(parent, namespace, key, element)
+        getStorage(true, Set(), parent, 'storages', namespace, key):delete(element)
     end
 
     function listStoredItem(parent, namespace, key)
@@ -640,7 +667,7 @@ do
             return
         end
         if old > 0 then
-            addStoredItem(parent, 'events', self, effect)
+            deleteStoredItem(parent, 'events', self, effect)
         end
         return self
     end
@@ -740,13 +767,19 @@ do
         for k, v in through(parameters) do
             newBehavior[k] = v
         end
+        setmetatable(newBehavior, Behavior)
         newBehavior.durationLeft = newBehavior.duration
         newBehavior.periodLeft = newBehavior.period
         newBehavior.flags = newBehavior.flags or Set()
-        setmetatable(newBehavior, Behavior)
         behaviors:add(newBehavior)
         getStorage(true, Set(), newBehavior.source, 'behaviors'):add(newBehavior)
         getStorage(true, Set(), newBehavior.target, 'behaviods'):add(newBehavior)
+        if newBehavior.sourceUnique then
+            getStorage(true, Map(), newBehavior.source, 'behaviorsUnique'):set(newBehavior.name, newBehavior)
+        end
+        if newBehavior.targetUnique then
+            getStorage(true, Map(), newBehavior.target, 'behaviodsUnique'):set(newBehavior.name, newBehavior)
+        end
         if newBehavior.linkedBuff ~= nil then
             score(newBehavior.target, 'buffs', newBehavior.linkedBuff, 1)
             if getScore(newBehavior.target, 'buffs', newBehavior.linkedBuff) > 0 then
@@ -760,7 +793,11 @@ do
 
     setmetatable(Behavior, behaviorMT)
 
-    Behavior.__index = Behavior
+    function Behavior.__index(this, key)
+        if Behavior[key] ~= nil then return Behavior[key] end
+        if key == 'prototype' then return end
+        if this.prototype[key] ~= nil then return this.prototype[key] end
+    end
 
     function Behavior.__call(this)
         if this.period then
@@ -795,8 +832,16 @@ do
     end
 
     function Behavior:destroy()
+        if self.flags:has('destroyed') then return end
+        self.flags:add('destroyed')
         getStorage(true, Set(), self.source, 'behaviors'):delete(self)
         getStorage(true, Set(), self.target, 'behaviods'):delete(self)
+        if self.sourceUnique then
+            getStorage(true, Map(), self.source, 'behaviorsUnique'):delete(self.name)
+        end
+        if self.targetUnique then
+            getStorage(true, Map(), self.target, 'behaviodsUnique'):delete(self.name)
+        end
         behaviors:delete(self)
         if self.linkedBuff ~= nil then
             score(self.target, 'buffs', self.linkedBuff, -1)
@@ -824,6 +869,16 @@ do
 
     function Behavior:search(target, parameters, source)
         local storage
+        if parameters.sourceUnique and source then
+            storage = getStorage(false, nil, target, 'behaviorsUnique')
+            if storage == nil then return nil end
+            return storage:get(parameters.name)
+        end
+        if parameters.targetUnique and not source then
+            storage = getStorage(false, nil, target, 'behaviodsUnique')
+            if storage == nil then return nil end
+            return storage:get(parameters.name)
+        end
         if source then
             storage = getStorage(false, nil, target, 'behaviors')
         else
@@ -878,19 +933,13 @@ do
             end
             Behavior:recycle()
         end)
-        timer:setFlag('global')
+        timer:setFlag('TIMER_FLAG_GLOBAL')
     end)
 end
 
 -- Units
 do
     units = Set()
-
-    destructableAbility = FourCC('A000')
-    destructables = Set()
-
-    specialEffectAbility = FourCC('A002')
-    specialEffects = Set()
 end
 
 -- Arcing Floating Text
@@ -1032,59 +1081,14 @@ end
 
 -- Dummy
 do
-    dummies = Set()
-
-    local player = Player(PLAYER_NEUTRAL_PASSIVE)
-    local DUMMY = FourCC('U000')
-
-    Dummy = setmetatable({}, { __call = function(this, unit, ability, order, level)
-        local dummy = Dummy:retrieve(GetOwningPlayer(unit), 0, 0, 0, 0)
+    DUMMY = FourCC('e000')
+    function Dummy(unit, ability, order, level)
+        local dummy = CreateUnit(GetOwningPlayer(unit), DUMMY, 0, 0, 0)
         UnitAddAbility(dummy, ability)
         SetUnitAbilityLevel(dummy, ability, level)
         IssueTargetOrder(dummy, order, unit)
-        UnitRemoveAbility(dummy, ability)
-        Dummy:recycle(dummy)
-    end })
-
-    function Dummy:recycle(unit)
-        dummies:add(unit)
-        SetUnitX(unit, WorldBounds.maxX)
-        SetUnitY(unit, WorldBounds.maxY)
-        SetUnitOwner(unit, player, false)
-        ShowUnit(unit, false)
-        BlzPauseUnitEx(unit, true)
-    end
-
-    function Dummy:retrieve(owner, x, y, z, face)
-        local dummy = nil
-        if dummies.size > 0 then
-            dummy = dummies[dummies.size - 1]
-            dummies:delete(dummy)
-            BlzPauseUnitEx(dummy, false)
-            ShowUnit(dummy, true)
-            SetUnitX(dummy, x)
-            SetUnitY(dummy, y)
-            SetUnitFlyHeight(dummy, z, 0)
-            BlzSetUnitFacingEx(dummy, face * bj_RADTODEG)
-            SetUnitOwner(dummy, owner, false)
-        else
-            dummy = CreateUnit(owner, DUMMY, x, y, face * bj_RADTODEG)
-            SetUnitFlyHeight(dummy, z, 0)
-        end
-
-        return dummy
-    end
-
-    function Dummy:timed(unit, delay)
-        local timer = Timer()
-        timer:start(delay, false, Map(Array('unit', unit)), function(parameters, this)
-            dummies:add(parameters.unit)
-            SetUnitX(parameters.unit, WorldBounds.maxX)
-            SetUnitY(parameters.unit, WorldBounds.maxY)
-            SetUnitOwner(parameters.unit, player, false)
-            ShowUnit(parameters.unit, false)
-            BlzPauseUnitEx(parameters.unit, true)
-            this:finish()
+        delay(function()
+            RemoveUnit(dummy)
         end)
     end
 end
@@ -1278,14 +1282,7 @@ do
 
         TriggerRegisterEnterRegion(trigger, region, nil)
         TriggerAddCondition(trigger, Filter(function()
-            if GetUnitAbilityLevel(GetTriggerUnit(), destructableAbility) > 0 then
-                destructables:add(GetTriggerUnit())
-                return
-            end
-            if GetUnitAbilityLevel(GetTriggerUnit(), specialEffectAbility) > 0 then
-                specialEffects:add(GetTriggerUnit())
-                return
-            end
+            if GetUnitTypeId(GetTriggerUnit()) == DUMMY then return end
             if getScore(GetTriggerUnit(), 'status', 'initialized') ~= 0 then return end
             units:add(GetTriggerUnit())
             score(GetTriggerUnit(), 'status', 'initialized', 1)
@@ -1295,17 +1292,10 @@ do
         for i = 0, bj_MAX_PLAYER_SLOTS - 1 do
             local group = CreateGroup()
             GroupEnumUnitsOfPlayer(group, Player(i), Filter(function()
-                if GetUnitAbilityLevel(GetFilterUnit(), destructableAbility) > 0 then
-                    destructables:add(GetFilterUnit())
-                    return
-                end
-                if GetUnitAbilityLevel(GetFilterUnit(), specialEffectAbility) > 0 then
-                    specialEffects:add(GetFilterUnit())
-                    return
-                end
+                if GetUnitTypeId(GetFilterUnit()) == DUMMY then return end
                 if getScore(GetFilterUnit(), 'status', 'initialized') ~= 0 then return end
                 units:add(GetFilterUnit())
-                score(GetTriggerUnit(), 'status', 'initialized', 1)
+                score(GetFilterUnit(), 'status', 'initialized', 1)
                 events.unitInit(Array(GetOwningPlayer(GetFilterUnit()), GetFilterUnit()), Map(Array(Array('source', GetFilterUnit()), Array('target', GetFilterUnit()))))
             end))
             DestroyGroup(group)
@@ -1328,12 +1318,63 @@ do
     Valiador('targetIsNonHero', function(arguments)
         return IsUnitType(arguments.target, UNIT_TYPE_HERO) == false
     end)
+    Valiador('sourceMechanic', function(arguments)
+        return IsUnitType(arguments.source, UNIT_TYPE_MECHANICAL)
+    end)
+    Valiador('sourceIsNonMechanic', function(arguments)
+        return IsUnitType(arguments.source, UNIT_TYPE_MECHANICAL) == false
+    end)
+    Valiador('sourceStructure', function(arguments)
+        return IsUnitType(arguments.source, UNIT_TYPE_STRUCTURE)
+    end)
+    Valiador('sourceIsNonStructure', function(arguments)
+        return IsUnitType(arguments.source, UNIT_TYPE_STRUCTURE) == false
+    end)
+
+    Valiador('sourceAlive', function(arguments)
+        return UnitAlive(arguments.source)
+    end)
+    Valiador('targetAlive', function(arguments)
+        return UnitAlive(arguments.target)
+    end)
+    Valiador('targetMagicImmune', function(arguments)
+        return IsUnitType(arguments.target,UNIT_TYPE_MAGIC_IMMUNE) or BlzIsUnitInvulnerable(arguments.target)
+    end)
+    Valiador('targetNotMagicImmune', function(arguments)
+        return IsUnitType(arguments.target,UNIT_TYPE_MAGIC_IMMUNE) == false and BlzIsUnitInvulnerable(arguments.target) == false
+    end)
+    Valiador('targetInvulnerable', function(arguments)
+        return BlzIsUnitInvulnerable(arguments.target)
+    end)
+    Valiador('targetNotInvulnerable', function(arguments)
+        return BlzIsUnitInvulnerable(arguments.target) == false
+    end)
+    Valiador('isEnemy', function(arguments)
+        return IsUnitEnemy(arguments.source, arguments.target)
+    end)
+    Valiador('isAlly', function(arguments)
+        return IsUnitAlly(arguments.source, arguments.target)
+    end)
+    Valiador('self', function(arguments)
+        return arguments.source == arguments.target
+    end)
+    Valiador('notSelf', function(arguments)
+        return arguments.source ~= arguments.target
+    end)
+
+    Valiador('physicalDamage', function(arguments)
+        return arguments.flags:has('DAMAGE_FLAG_ATTACK')
+    end)
+    Valiador('spellDamage', function(arguments)
+        return arguments.flags:has('DAMAGE_FLAG_SPELL')
+    end)
 end
 
 -- Unit Management
 do
     local decayTimers = Map()
     local oldFunc = RemoveUnit
+    oldRemoveUnit = oldFunc
 
     function RemoveUnit(unit)
         if not units:has(unit) then return end
@@ -1623,6 +1664,202 @@ do
     end
 end
 
+-- Advanced Selections
+do
+    local function LocIsAlly(u,p)
+        return IsUnitAlly(u,p)
+    end
+    local function LocIsEnemy(u,p)
+        return IsUnitEnemy(u,p)
+    end
+    local function LocIsBiological(u,p)
+        return not IsUnitType(u,UNIT_TYPE_MECHANICAL)
+    end
+    local function LocIsMechanical(u,p)
+        return IsUnitType(u,UNIT_TYPE_MECHANICAL)
+    end
+    local function LocIsNonHero(u,p)
+        return not IsUnitType(u,UNIT_TYPE_HERO)
+    end
+    local function LocIsHero(u,p)
+        return IsUnitType(u,UNIT_TYPE_HERO)
+    end
+    local function LocIsMagicVulnerable(u,p)
+        return not IsUnitType(u,UNIT_TYPE_MAGIC_IMMUNE)
+    end
+    local function LocIsMagicImmune(u,p)
+        return IsUnitType(u,UNIT_TYPE_MAGIC_IMMUNE)
+    end
+    local function LocIsNonStructure(u,p)
+        return not IsUnitType(u,UNIT_TYPE_STRUCTURE)
+    end
+    local function LocIsStructure(u,p)
+        return IsUnitType(u,UNIT_TYPE_STRUCTURE)
+    end
+    local function LocIsVulnerable(u,p)
+        return not BlzIsUnitInvulnerable(u)
+    end
+    local function LocIsInvulnerable(u,p)
+        return BlzIsUnitInvulnerable(u)
+    end
+    local function LocIsGround(u,p)
+        return IsUnitType(u,UNIT_TYPE_GROUND)
+    end
+    local function LocIsAir(u,p)
+        return IsUnitType(u,UNIT_TYPE_FLYING)
+    end
+    local function LocIsSelf(u,p,u2)
+        return u == u2
+    end
+    local function LocIsNotSelf(u,p,u2)
+        return u ~= u2
+    end
+
+    local filters = Map(Array(
+        Array('ally', LocIsAlly),
+        Array('enemy', LocIsEnemy),
+        Array('biological', LocIsBiological),
+        Array('mechanical', LocIsMechanical),
+        Array('nonHero', LocIsNonHero),
+        Array('hero', LocIsHero),
+        Array('magicVulnerable', LocIsMagicVulnerable),
+        Array('magicImmune', LocIsMagicImmune),
+        Array('nonStructure', LocIsNonStructure),
+        Array('structure', LocIsStructure),
+        Array('vulnerable', LocIsVulnerable),
+        Array('invulnerable', LocIsInvulnerable),
+        Array('ground', LocIsGround),
+        Array('air', LocIsAir),
+        Array('self', LocIsSelf),
+        Array('notSelf', LocIsNotSelf)
+    ))
+
+    function Group2Array(group)
+        local array = Array()
+        for i = 0, BlzGroupGetSize(group) - 1 do
+            array:push(BlzGroupUnitAt(group, i))
+        end
+        return array
+    end
+
+    function FilterUnits(units, filter, unit2)
+        local results = Array()
+        local player = GetOwningPlayer(unit2)
+        for _, v in through(units) do
+            for __, i in through(filter) do
+                if not filters:get(i)(v, player, unit2) then goto next end
+            end
+            results:push(v)
+            :: next ::
+        end
+        return results
+    end
+
+    function GetUnitsInRangeOfUnitSimple(unit,radius)
+        local group = CreateGroup()
+        local x=GetUnitX(unit)
+        local y=GetUnitY(unit)
+        GroupEnumUnitsInRange(group,x,y,radius,nil)
+        local list=Group2Array(group)
+        DestroyGroup(group)
+
+        return list
+    end
+
+    function UnitsInRangeCollision(x,y,radius)
+        local group = CreateGroup()
+        GroupEnumUnitsInRange(group,x,y,radius+450,nil)
+        local list=Group2Array(group)
+        DestroyGroup(group)
+
+        local removeIndexes = Array()
+        for k,v in through(list) do
+            local distance=SquareRoot((x-GetUnitX(v))^2+(y-GetUnitY(v))^2)
+            if distance-BlzGetUnitCollisionSize(v)>radius then removeIndexes:push(k) end
+        end
+
+        local removed = 0
+        for i,v in through(removeIndexes) do
+            list:splice(v-removed,1)
+            table.remove(list, v-removed)
+            removed = removed + 1
+        end
+
+        return list
+    end
+
+    function UnitsInRangeOfUnitCollision(unit,radius)
+        local group = CreateGroup()
+        local x=GetUnitX(unit)
+        local y=GetUnitY(unit)
+        GroupEnumUnitsInRange(group,x,y,radius+450,nil)
+        local list=Group2Array(group)
+        DestroyGroup(group)
+
+        local removeIndexes = Array()
+        for k,v in through(list) do
+            local distance=SquareRoot((x-GetUnitX(v))^2+(y-GetUnitY(v))^2)
+            if distance-BlzGetUnitCollisionSize(unit)-BlzGetUnitCollisionSize(v)>radius then removeIndexes:push(k) end
+        end
+
+        local removed = 0
+        for i,v in through(removeIndexes) do
+            list:splice(v-removed,1)
+            table.remove(list, v-removed)
+            removed = removed + 1
+        end
+
+        return list
+    end
+
+    function UnitsInRangeOfLineCollision(x1,y1,x2,y2,radius)
+        if x1-x2==0 then x1=x2+0.05 end
+        local k=(y1-y2)/(x1-x2)
+        local b=y1-k*x1
+        local group=CreateGroup()
+        GroupEnumUnitsInRange(group,(x1+x2)/2,(y1+y2)/2,0.5*SquareRoot((x1-x2)^2+(y1-y2)^2)+radius+450,nil)
+        local list=Group2Array(group)
+        DestroyGroup(group)
+
+        local removeIndexes = Array()
+        for i,u in through(list) do
+            local distance=(k*GetUnitX(u)+b-GetUnitY(u))/SquareRoot(1+k^2)
+            if distance<0 then distance=-1*distance end
+            if distance-BlzGetUnitCollisionSize(u)>radius then removeIndexes:push(k) end
+        end
+
+        local removed = 0
+        for i,v in through(removeIndexes) do
+            list:splice(v-removed,1)
+            table.remove(list, v-removed)
+            removed = removed + 1
+        end
+
+        return list
+    end
+end
+
+-- Spell AutoInit
+do
+    local effecs = Map()
+
+    Effect('spellAutoEffect', function(event)
+        if effecs:has(event:get('ability')) then
+            effecs:get(event:get('ability'))(event)
+        end
+    end)
+
+    function initSpellAuto(ability, code)
+        effecs:set(ability, code)
+    end
+
+    init(function()
+        events.unitSpellEffect:register('global', effects.spellAutoEffect, 1)
+    end)
+
+end
+
+--[[
 -- Projectile Effect
 do
     ProjectileEffect = { type = 'projectileEffect' }
@@ -1738,7 +1975,7 @@ end
 do
     local COLLISION_SIZE = 128.
     local ITEM_SIZE = 16.
-    local DUMMY = FourCC('U000')
+    local DUMMY = FourCC('e000')
     local location = Location(0., 0.)
     local rect = Rect(0., 0., 0., 0.)
 
@@ -1986,3 +2223,4 @@ do
 
     setmetatable(Projectile, projectileMT)
 end
+--]]

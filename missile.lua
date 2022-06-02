@@ -538,7 +538,7 @@ do
     -- item size used in z collision
     local ITEM_SIZE  = 16.
     -- Raw code of the dummy unit used for vision
-    local DUMMY = FourCC('U000')
+    local DUMMY = FourCC('e002')
     -- Needed, dont touch. Seriously, dont touch!
     local location = Location(0., 0.)
     local rect = Rect(0., 0., 0., 0.)
